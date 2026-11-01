@@ -24,6 +24,13 @@ def _写jsonl(路径, 记录):
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+def _指定工作表(输入: dict):
+    值 = 输入.get("b工作表")
+    if not 值:
+        return None
+    return [值] if isinstance(值, str) else list(值)
+
+
 def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     运行目录 = Path(运行目录)
     运行目录.mkdir(parents=True, exist_ok=True)
@@ -36,9 +43,10 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     上下文 = json.loads(Path(产物["上下文"]).read_text(encoding="utf-8-sig"))
     金标准 = 输入.get("金标准")
 
-    for 侧, 表文件, 表上下文 in (("A", 产物["表A"], 上下文.get("tables", [])),
-                            ("B", 输入["b表"], None)):
-        结果 = 识别一侧(配置, 表文件, 侧, 运行目录, 金标准, 表上下文, 取消=取消)
+    for 侧, 表文件, 表上下文, 只跑表 in (("A", 产物["表A"], 上下文.get("tables", []), None),
+                                  ("B", 输入["b表"], None, _指定工作表(输入))):
+        结果 = 识别一侧(配置, 表文件, 侧, 运行目录, 金标准, 表上下文,
+                   取消=取消, 只跑表=只跑表)
         if 结果["待答复"]:
             索引 = 读索引(运行目录) or 索引
             索引["步骤"] = "identify_a" if 侧 == "A" else "identify_b"

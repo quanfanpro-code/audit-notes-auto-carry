@@ -24,6 +24,7 @@ document.querySelectorAll("[data-选]").forEach((b) => b.addEventListener("click
 let 轮询 = null;
 $("开始").addEventListener("click", async () => {
   const 输入 = { word: $("word").value, b表: $("b表").value, 金标准: $("金标准").value };
+  if ($("b工作表").value.trim()) 输入.b工作表 = $("b工作表").value.trim();
   if (!输入.word || !输入.b表 || !输入.金标准) { $("进度").textContent = "三个文件都要先选好。"; return; }
   $("进度").textContent = "启动中…";
   const 结果 = await 请求("/api/任务", 输入);

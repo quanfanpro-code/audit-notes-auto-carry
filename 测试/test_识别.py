@@ -111,6 +111,32 @@ def test_无对应科目不进表名册():
     assert list(待表科目(划分, 索引)) == ["货币资金"]
 
 
+def test_指定工作表时只读那一张(tmp_path):
+    from openpyxl.workbook.defined_name import DefinedName
+    wb = Workbook(); 甲 = wb.active; 甲.title = "使用说明"; 甲["A1"] = "说明文字甲"
+    乙 = wb.create_sheet("word附注"); 乙["A1"] = "书签名"; 乙["A2"] = "目标内容乙"
+    wb.defined_names["_Hlk1"] = DefinedName("_Hlk1", attr_text="'word附注'!$A$1")
+    p = tmp_path / "b.xlsx"; wb.save(p)
+    快照 = 读快照(p)
+    from 核心.识别 import 全文文字, _定位
+    文 = 全文文字(快照, 只跑表=["word附注"])
+    assert "目标内容乙" in 文 and "说明文字甲" not in 文   # 书签式命名区域不能把整表缩成一格
+    _, 工作表, 范围 = _定位(快照, [1, 2], 只跑表=["word附注"])
+    assert 工作表 == "word附注" and 范围.startswith("A1")   # 不能退回第一张，也不能缩到书签范围
+
+
+def test_多工作表未指定时明确报错(tmp_path):
+    wb = Workbook(); wb.active.title = "甲"; wb.active["A1"] = 1
+    wb.create_sheet("乙")["A1"] = 2
+    p = tmp_path / "x.xlsx"; wb.save(p)
+    from 核心.识别 import 全文文字
+    try:
+        全文文字(读快照(p))
+        assert False, "多工作表又没指定，应报错而不是全读"
+    except RuntimeError as e:
+        assert "工作表" in str(e)
+
+
 def test_多工作表且无命名区域时不猜表(tmp_path):
     wb = Workbook(); wb.active.title = "甲"; wb.active["A1"] = 1
     wb.create_sheet("乙")["A1"] = 2

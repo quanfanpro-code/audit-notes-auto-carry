@@ -254,12 +254,25 @@ def _整表范围(表) -> str:
     return f"{get_column_letter(min(列们))}{min(行们)}:{get_column_letter(max(列们))}{max(行们)}"
 
 
-def 全文文字(快照) -> str:
-    """整个文件：有命名区域就逐区域出，没有就把整张工作表出。"""
+def 全文文字(快照, 只跑表=None) -> str:
+    """整个文件：有命名区域就逐区域出，没有就把该工作表整张出。
+
+    只跑表 给定时只读这些工作表；工作表多于一张又没指定时报错，不默认取第一张。
+    """
+    表们 = 快照["sheets"]
+    if 只跑表 is not None:
+        要读 = [s for s in 表们 if s["name"] in set(只跑表)]
+        if not 要读:
+            raise RuntimeError(f"指定的工作表不存在：{'、'.join(map(str, 只跑表))}")
+    elif len(表们) > 1:
+        raise RuntimeError("有多张工作表，必须先指定要读哪一张")
+    else:
+        要读 = 表们
     段 = []
-    for 表 in 快照["sheets"]:
-        区域们 = [(名, 位["range"]) for 名, 位置们 in (快照.get("names") or {}).items()
-                for 位 in 位置们 if 位.get("sheet") == 表["name"]]
+    for 表 in 要读:
+        区域们 = [] if 只跑表 is not None else [
+            (名, 位["range"]) for 名, 位置们 in (快照.get("names") or {}).items()
+            for 位 in 位置们 if 位.get("sheet") == 表["name"]]
         if 区域们:
             段 += [表格转文字(快照, {"sheet": 表["name"], "range": str(范围)}) for _, 范围 in 区域们]
         else:
@@ -269,11 +282,14 @@ def 全文文字(快照) -> str:
     return "\n\n".join(段)
 
 
-def _定位(快照, 行范围: list) -> tuple:
-    """返回（命名区域名或 None, 工作表, 精确范围）。最小覆盖该行段的区域优先。"""
+def _定位(快照, 行范围: list, 只跑表=None) -> tuple:
+    """返回（命名区域名或 None, 工作表, 精确范围）。最小覆盖该行段的区域优先。
+
+    指定了工作表就不认命名区域——那类文件里的命名多半是书签，不是表边界。
+    """
     起, 止 = 行范围
     最优 = None
-    for 名, 位置们 in (快照.get("names") or {}).items():
+    for 名, 位置们 in ([] if 只跑表 is not None else (快照.get("names") or {}).items()):
         for 位 in 位置们:
             try:
                 _, 顶, _, 底 = range_boundaries(str(位["range"]))
@@ -284,14 +300,19 @@ def _定位(快照, 行范围: list) -> tuple:
     if 最优:
         return 最优[0], 最优[1], 最优[2]
     工作表们 = 快照["sheets"]
-    if len(工作表们) > 1:
+    if 只跑表 is not None:
+        候选 = [s for s in 工作表们 if s["name"] in set(只跑表)]
+        if len(候选) != 1:
+            raise RuntimeError(f"指定的工作表不存在或不唯一：{'、'.join(map(str, 只跑表))}")
+    elif len(工作表们) == 1:
+        候选 = 工作表们
+    else:
         raise RuntimeError("没有命名区域且不止一张工作表，无法判断表在哪张工作表上")
-    工作表 = 工作表们[0]["name"]
-    表 = 工作表们[0]
+    表 = 候选[0]
     列们 = [c["column"] for c in (表.get("cells") or {}).values() if 起 <= c["row"] <= 止]
     左 = get_column_letter(min(列们)) if 列们 else "A"
     右 = get_column_letter(max(列们)) if 列们 else "A"
-    return None, 工作表, f"{左}{起}:{右}{止}"
+    return None, 表["name"], f"{左}{起}:{右}{止}"
 
 
 def _合并们(快照, 工作表: str, 范围: str) -> list:
@@ -365,7 +386,7 @@ def 补原值(记录们: list, 快照) -> list:
 # —— 一侧的完整三遍 ——
 
 def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文件, 上下文=None,
-         只用已有答复=False, 取消=None) -> dict:
+         只用已有答复=False, 取消=None, 只跑表=None) -> dict:
     运行目录 = Path(运行目录)
     运行目录.mkdir(parents=True, exist_ok=True)
     快照 = 读快照(表文件路径, 上下文)
@@ -377,7 +398,7 @@ def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文�
     def 共用文字():
         nonlocal 文字
         if 文字 is None:
-            文字 = 全文文字(快照)
+            文字 = 全文文字(快照, 只跑表)
         return 文字
 
     # 第一遍：分科目
@@ -408,7 +429,7 @@ def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文�
             return {"结构清单": None, "合集": None, "统计": 统计, "待答复": [str(目录)]}
         本侧 = []
         for 表 in _解析表(答复, 表名册, 划分):
-            区域, 工作表, 范围 = _定位(快照, 表["行范围"])
+            区域, 工作表, 范围 = _定位(快照, 表["行范围"], 只跑表)
             本侧.append({"侧": 侧名, "区域": 区域, "工作表": 工作表, "范围": 范围,
                        "行范围": 表["行范围"], "科目": 表["科目"], "表名": 表["表名"],
                        "列": [], "行": [], "作用范围": {}, "原始结构": {}, "例外": [],
