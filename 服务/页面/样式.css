@@ -1,0 +1,17 @@
+:root { --底色:#f4f2ed; --主色:#245c83; --文字:#182e3c; --次文字:#586a75; --边框:#d9dedc; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:"Microsoft YaHei","Segoe UI",sans-serif; background:var(--底色); color:var(--文字); font-size:15px; }
+header { background:var(--主色); color:#fff; padding:16px 26px; font-size:20px; font-weight:700; }
+nav { display:flex; gap:8px; padding:12px 26px 0; }
+nav button { border:1px solid var(--边框); background:#fff; color:var(--次文字); padding:8px 22px; border-radius:8px 8px 0 0; cursor:pointer; font-size:15px; }
+nav button.当前 { background:#fff; color:var(--主色); font-weight:700; border-bottom-color:#fff; }
+main { background:#fff; margin:0 26px 26px; padding:24px; border:1px solid var(--边框); border-radius:0 10px 10px 10px; min-height:420px; }
+section[hidden] { display:none; }
+.行 { display:flex; align-items:center; gap:10px; margin:12px 0; flex-wrap:wrap; }
+.行 label { width:230px; color:var(--次文字); }
+.行 input { flex:1; min-width:260px; padding:8px 10px; border:1px solid var(--边框); border-radius:6px; background:#faf8f3; color:var(--文字); }
+.行 input[readonly] { color:var(--次文字); }
+button { padding:8px 16px; border:1px solid var(--边框); border-radius:6px; background:#faf8f3; cursor:pointer; }
+button.主 { background:var(--主色); color:#fff; border-color:var(--主色); font-weight:700; }
+button:hover { filter:brightness(0.97); }
+pre { background:#faf8f3; border:1px solid var(--边框); border-radius:8px; padding:14px; margin-top:12px; white-space:pre-wrap; color:var(--次文字); max-height:420px; overflow:auto; font-size:13px; }

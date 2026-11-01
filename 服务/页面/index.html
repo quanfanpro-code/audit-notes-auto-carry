@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>审计附注自动搬运系统</title>
+<link rel="stylesheet" href="/static?name=样式.css">
+</head>
+<body>
+<header>审计附注自动搬运系统</header>
+<nav>
+  <button class="页签 当前" data-页="任务">任务</button>
+  <button class="页签" data-页="结果">结果</button>
+  <button class="页签" data-页="设置">设置</button>
+  <button class="页签" data-页="回写">人工回写</button>
+</nav>
+<main>
+  <section id="任务">
+    <div class="行"><label>Word 附注原件</label><input id="word" readonly><button data-选="word">选择</button></div>
+    <div class="行"><label>统计 Excel</label><input id="b表" readonly><button data-选="b表">选择</button></div>
+    <div class="行"><label>金标准主文件</label><input id="金标准" readonly><button data-选="金标准">选择</button></div>
+    <div class="行"><button id="开始" class="主">开始任务</button><button id="中断">中断</button></div>
+    <pre id="进度">等待开始…</pre>
+  </section>
+  <section id="结果" hidden>
+    <div class="行"><button id="刷新结果">刷新结果</button></div>
+    <pre id="结果内容"></pre>
+  </section>
+  <section id="设置" hidden>
+    <div class="行"><label>API 地址</label><input id="url" placeholder="https://…/v1"></div>
+    <div class="行"><label>API 密钥</label><input id="api_key" type="password" placeholder="留空表示不修改"></div>
+    <div class="行"><label>模型名</label><input id="model"></div>
+    <div class="行"><label>超时（秒）</label><input id="timeout" value="600"></div>
+    <div class="行"><button id="保存设置" class="主">保存</button><button id="测试连通">测试连通</button><span id="设置提示"></span></div>
+  </section>
+  <section id="回写" hidden>
+    <div class="行"><label>带连接 Word</label><input id="带连接word" readonly><button data-选="带连接word">选择</button></div>
+    <div class="行"><label>更新后 Excel（人工保存的）</label><input id="回写excel" readonly><button data-选="回写excel">选择</button></div>
+    <div class="行"><label>基准表A（可选，用于判断增删行落在哪张表）</label><input id="基准表A" readonly><button data-选="基准表A">选择</button></div>
+    <div class="行"><button id="执行回写" class="主">回写 Word 新副本</button></div>
+    <pre id="回写结果"></pre>
+  </section>
+</main>
+<script src="/static?name=脚本.js"></script>
+</body>
+</html>

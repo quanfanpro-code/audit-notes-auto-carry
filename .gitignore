@@ -1,0 +1,19 @@
+# 运行产物与真实客户数据，绝不入库
+运行/
+
+# 本机模型配置（含加密后的密钥）
+模型配置.json
+
+# Word 桥接编译产物（第三方二进制，另行放置）
+Word桥接/发布/
+
+# Python 缓存
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 编辑器与系统
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,42 @@
+﻿{
+  "word": "C:\\Users\\27651\\Documents\\Code\\审计附注自动搬运系统\\测试\\样本\\01_普通表格.docx",
+  "excel": "C:\\Users\\27651\\Documents\\Code\\审计附注自动搬运系统\\测试\\样本\\冒烟_表A.xlsx",
+  "linked_word": "C:\\Users\\27651\\Documents\\Code\\审计附注自动搬运系统\\测试\\样本\\冒烟_带连接.docx",
+  "scope": null,
+  "tables": [
+    {
+      "table_id": "/word/document.xml#body/3",
+      "range_name": "TA_001",
+      "title": "仅用于行列编号对照。请只读打开，不修复另存、不更新外部链接。",
+      "chapter_context": [
+        "01_普通表格.docx",
+        "普通表格：两行三列，无合并。",
+        "仅用于行列编号对照。请只读打开，不修复另存、不更新外部链接。"
+      ],
+      "preceding_blocks": [
+        {
+          "kind": "paragraph",
+          "text": "01_普通表格.docx"
+        },
+        {
+          "kind": "paragraph",
+          "text": "普通表格：两行三列，无合并。"
+        },
+        {
+          "kind": "paragraph",
+          "text": "仅用于行列编号对照。请只读打开，不修复另存、不更新外部链接。"
+        }
+      ],
+      "unit_text_candidates": [],
+      "context_note": "preceding_blocks只记录当前表前原文与表格的先后顺序，不表示各段适用于当前表。table标记表示原文中实际经过的表格；chapter_context是其中的正文段落。unit_text_candidates只是出现单位字样的候选原文，须按说明含义及其所属表判断，不能按距离指定单位。当前表的sheet及行列范围仅用于关联原文，不证明前述所有说明都适用。",
+      "sheet": "sheet1",
+      "first_row": 2,
+      "first_column": 2,
+      "row_count": 2,
+      "column_count": 3,
+      "source": "C:\\Users\\27651\\Documents\\Code\\审计附注自动搬运系统\\测试\\样本\\冒烟_表A.xlsx",
+      "link_error": null,
+      "structural_omissions": []
+    }
+  ]
+}
