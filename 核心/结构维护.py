@@ -86,6 +86,19 @@ def _连续(序列):
     return runs
 
 
+def _行有值(表) -> set:
+    return {c["row"] for c in (表.get("cells") or {}).values()
+            if c.get("value") not in (None, "") or c.get("formula")}
+
+
+def _行有样式(表) -> set:
+    return {c["row"] for c in (表.get("cells") or {}).values() if (c.get("style_id") or 0)}
+
+
+def _列存在(表) -> set:
+    return {c["column"] for c in (表.get("cells") or {}).values()}
+
+
 def 生成结构操作(基准表A路径, 修改后excel路径) -> list:
     """返回桥接 operations 数组；结构未变返回 []。落不到区域就 raise，交人工。"""
     甲 = 读快照(基准表A路径)
@@ -98,13 +111,22 @@ def 生成结构操作(基准表A路径, 修改后excel路径) -> list:
         甲行, 甲号 = _行签名(表甲)
         乙行 = _行签名(表乙)[0]
         甲合并, 乙合并 = _合并集(表甲), _合并集(表乙)
+        if _列存在(表甲) != _列存在(表乙):
+            # 列数或列位置变了：本期不支持自动处理，必须明确拒绝，不许装作没发生
+            raise RuntimeError("列结构变化，本期不支持，交人工")
         if len(甲行) == len(乙行) and 甲合并 == 乙合并:
             continue                             # 只改名等：结构没动，直接放行
         前, 后 = _前后缀(甲行, 乙行)
         甲余 = list(range(前, len(甲行) - 后))
         乙余 = list(range(前, len(乙行) - 后))
+        # 删行还是清空：
+        # - 该行位置在对面已有别人顶上（有值）→ 真删行；
+        # - 该行在对面完全消失（样式也没了）→ 真删行；
+        # - 该行还在、只是没内容（样式还在）→ 只是清空，不生成删行操作。
+        乙值行, 乙样式行 = _行有值(表乙), _行有样式(表乙)
+        甲余 = [i for i in 甲余 if 甲号[i] in 乙值行 or 甲号[i] not in 乙样式行]
         if not 甲余 and not 乙余:
-            raise RuntimeError(f"工作表 {名} 行结构变化无法判断增删，交人工")
+            continue                             # 只是内容变空，结构没动
         if 甲余 and 乙余:
             raise RuntimeError(f"工作表 {名} 同时存在增行与删行，暂不支持，交人工")
 

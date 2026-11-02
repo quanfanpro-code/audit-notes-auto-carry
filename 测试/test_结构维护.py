@@ -58,3 +58,66 @@ def test_区域归属(tmp_path):
     assert 区域归属(快照, "s1", 2, 1) == "TA_001"
     assert 区域归属(快照, "s1", 2, 2) is None      # 跨出区域
 
+
+# —— R6：列变化明确拒绝、清空内容不算删行 ——
+
+def test_加列明确报不支持(tmp_path):
+    from openpyxl.styles import Font
+    三行 = [(1, "合计", 10), (2, "甲公司", 20), (3, "乙公司", 30)]
+    基 = 建表(tmp_path / "基准.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
+    改 = 建表(tmp_path / "改后.xlsx", 三行, {"TA_001": "s1!$A$1:$C$3"})
+    wb2 = load_workbook(改); ws = wb2["s1"]
+    for 行 in (1, 2, 3):
+        ws[f"C{行}"] = 行 * 100                      # 真加了一列并填了值
+        ws[f"C{行}"].font = Font(bold=True)
+    wb2.save(改)
+    try:
+        生成结构操作(基, 改)
+        assert False, "加列应明确报不支持，不能返回空操作"
+    except RuntimeError as e:
+        assert "列结构变化" in str(e)
+
+
+def test_清空内容不算删行(tmp_path):
+    from openpyxl.styles import Font
+    三行 = [(1, "合计", 10), (2, "甲公司", 20), (3, "乙公司", 30)]
+    基 = 建表(tmp_path / "基准.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
+    改 = 建表(tmp_path / "改后.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
+    wb2 = load_workbook(改); ws = wb2["s1"]
+    for 列 in ("A", "B"):
+        ws[f"{列}3"] = None                          # 清空第三行内容，行本身还在
+        ws[f"{列}3"].font = Font(bold=True)          # 样式仍在，行没有被删
+    wb2.save(改)
+    assert 生成结构操作(基, 改) == []                 # 没删行，就不产生删行操作
+
+
+# —— R6：列变化明确拒绝、清空内容不算删行 ——
+
+def test_加列明确报不支持(tmp_path):
+    from openpyxl.styles import Font
+    三行 = [(1, "合计", 10), (2, "甲公司", 20), (3, "乙公司", 30)]
+    基 = 建表(tmp_path / "基准.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
+    改 = 建表(tmp_path / "改后.xlsx", 三行, {"TA_001": "s1!$A$1:$C$3"})
+    wb2 = load_workbook(改); ws = wb2["s1"]
+    for 行 in (1, 2, 3):
+        ws[f"C{行}"] = 行 * 100                      # 真加了一列并填了值
+        ws[f"C{行}"].font = Font(bold=True)
+    wb2.save(改)
+    try:
+        生成结构操作(基, 改)
+        assert False, "加列应明确报不支持，不能返回空操作"
+    except RuntimeError as e:
+        assert "列结构变化" in str(e)
+
+
+def test_清空内容不算删行(tmp_path):
+    from openpyxl.styles import Font
+    三行 = [(1, "合计", 10), (2, "甲公司", 20), (3, "乙公司", 30)]
+    基 = 建表(tmp_path / "基准.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
+    改 = 建表(tmp_path / "改后.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
+    wb2 = load_workbook(改); ws = wb2["s1"]
+    for 列 in ("A", "B"):
+        ws[f"{列}3"] = None                          # 清空第三行内容，行本身还在
+        ws[f"{列}3"].font = Font(bold=True)          # 样式仍在，行没有被删
+    wb2.save(改)
+    assert 生成结构操作(基, 改) == []                 # 没删行，就不产生删行操作
