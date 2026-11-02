@@ -34,3 +34,27 @@ def 记启动(文本: str) -> None:
     日志路径.parent.mkdir(parents=True, exist_ok=True)
     with 日志路径.open("a", encoding="utf-8") as f:
         f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {文本}\n")
+
+
+def 服务日志路径() -> Path:
+    return 日志路径.parent / "服务日志.txt"
+
+
+def 日志配置() -> dict:
+    """给 uvicorn 一份写文件的日志配置。
+
+    双击启动没有控制台，sys.stdout／sys.stderr 是 None；uvicorn 默认格式器会去问
+    输出流 isatty，直接抛 ValueError: Unable to configure formatter 'default'。
+    这里一律写文件，不碰标准输出。
+    """
+    路径 = 服务日志路径()
+    路径.parent.mkdir(parents=True, exist_ok=True)
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {"简单": {"format": "%(asctime)s %(levelname)s %(message)s"}},
+        "handlers": {"文件": {"class": "logging.FileHandler", "filename": str(路径),
+                            "formatter": "简单", "encoding": "utf-8"}},
+        "loggers": {名: {"handlers": ["文件"], "level": "INFO", "propagate": False}
+                    for 名 in ("uvicorn", "uvicorn.error", "uvicorn.access")},
+    }

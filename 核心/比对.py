@@ -6,6 +6,8 @@
 - 期间角色只在金标准要求期间时才进配对键；不要求期间时，期间不同也照配，原值保留。
 - 序号只对名单项有意义；固定项没有序号，按编号配，顺序不同也能对上。
 - 汇总格再加分组，两个分组的小计不串组。
+- 项数按完整项清单算（含识别失败的占位项），不按物理行列数。
+- 清尾只清名单项，且只清尾部；合计、小计、固定项永远不清尾。
 - 判重使用同一套完整键：不同编号各一格不算重复。
 """
 _口径键 = ("币种", "单位", "期间跨度")
@@ -31,19 +33,28 @@ def _结构索引(结构) -> dict:
     return 出
 
 
-def _行号(记录):
-    行号 = 记录.get("行号")
-    if isinstance(行号, int):
-        return 行号
-    坐标 = str(记录.get("格") or "")
-    数字 = "".join(ch for ch in 坐标.split("!")[-1] if ch.isdigit())
-    return int(数字) if 数字 else -1
+def _项键(记录) -> tuple:
+    """一项 = 同一张业务表里的同一条明细行，或者同一列（横向名单）。"""
+    return (str(记录.get("表组") or ""), str(记录.get("项方式") or "行"),
+            str(记录.get("项位置")))
 
 
-def _列字母(记录) -> str:
-    坐标 = str(记录.get("格") or "")
-    字母 = "".join(ch for ch in 坐标.split("!")[-1] if ch.isalpha())
-    return 字母.upper()
+def _按项(记录们: list) -> dict:
+    出 = {}
+    for r in 记录们:
+        出.setdefault(_项键(r), []).append(r)
+    return 出
+
+
+def _有序项(项表: dict) -> list:
+    def 排序键(键):
+        位置 = 键[2]
+        return (键[1], int(位置) if str(位置).isdigit() else 0, str(位置))
+    return sorted(项表, key=排序键)
+
+
+def _是名单项(记录们: list) -> bool:
+    return any(r.get("序号") is not None for r in 记录们)
 
 
 def _键(记录) -> tuple:
@@ -77,16 +88,6 @@ def _完整性好(表记录) -> bool:
     return all(bool(完.get(k)) for k in _完整性键)
 
 
-def _需加项(甲: list, 乙: list) -> bool:
-    """B 的行或列比 A 多，A 装不下：整表停，交人工加行加列。"""
-    def 量(记录们):
-        有效 = [r for r in 记录们 if r.get("角色") != "项标签"]
-        return ({_行号(r) for r in 有效}, {_列字母(r) for r in 有效})
-    a行, a列 = 量(甲)
-    b行, b列 = 量(乙)
-    return len(b行) > len(a行) or len(b列) > len(a列)
-
-
 def _期间未知(记录) -> bool:
     """该编号要求期间、识别却写了“未知”：两侧都写未知也不能凑成一对。"""
     if not 记录.get("期间必填"):
@@ -95,19 +96,27 @@ def _期间未知(记录) -> bool:
     return str(维度.get("期间角色") or "未知") == "未知"
 
 
-def _清尾可用(记录, 乙: list) -> bool:
-    """A 多出来的名单项能不能清：序号必须排在 B 同编号所有项之后。"""
-    if 记录.get("序号") is None:
-        return False
-    同 = [x.get("序号") for x in 乙
-         if x.get("槽位") == 记录.get("槽位") and x.get("序号") is not None]
-    return bool(同) and 记录.get("序号") > max(同)
+def _整组未对应(甲: list, 乙: list, 原因: str) -> list:
+    """整组判不了时也要逐格进清单；项标签另有标记，不算“漏了”。"""
+    清单 = []
+    for r in 甲:
+        if r.get("角色") == "项标签":
+            清单.append(_项(r, None, "不参与", "项标签"))
+        else:
+            清单.append(_项(r, None, "未对应", 原因))
+    for r in 乙:
+        if r.get("角色") != "项标签":
+            清单.append(_项(None, r, "未对应", 原因))
+    return 清单
 
 
-def _一组配对(甲: list, 乙: list, 清尾可: bool) -> list:
+def _配对(甲: list, 乙: list, 清尾项: set) -> list:
     清单 = []
     a桶, b桶 = {}, {}
     for r in 甲:
+        if _项键(r) in 清尾项:
+            清单.append(_项(r, None, "清尾", None))   # 整项清空：标签和数字一起
+            continue
         if r.get("角色") == "项标签":
             清单.append(_项(r, None, "不参与", "项标签"))
             continue
@@ -140,10 +149,7 @@ def _一组配对(甲: list, 乙: list, 清尾可: bool) -> list:
             continue
         甲记 = 记录们[0]
         if not 对手们:
-            if 清尾可 and _清尾可用(甲记, 乙):
-                清单.append(_项(甲记, None, "清尾", None))
-            else:
-                清单.append(_项(甲记, None, "未对应", "仅A侧有"))
+            清单.append(_项(甲记, None, "未对应", "仅A侧有"))
             continue
         乙记 = 对手们[0]
         已用.add(id(乙记))
@@ -161,20 +167,6 @@ def _一组配对(甲: list, 乙: list, 清尾可: bool) -> list:
     return 清单
 
 
-def _整组未对应(甲: list, 乙: list, 原因: str) -> list:
-    """整组判不了时也要逐格进清单；项标签另有标记，不算“漏了”。"""
-    清单 = []
-    for r in 甲:
-        if r.get("角色") == "项标签":
-            清单.append(_项(r, None, "不参与", "项标签"))
-        else:
-            清单.append(_项(r, None, "未对应", 原因))
-    for r in 乙:
-        if r.get("角色") != "项标签":
-            清单.append(_项(None, r, "未对应", 原因))
-    return 清单
-
-
 def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> list:
     A结, B结 = _结构索引(A结构), _结构索引(B结构)
     a组, b组 = {}, {}
@@ -185,26 +177,33 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
     清单 = []
     for 组键 in list(dict.fromkeys(list(a组) + list(b组) + list(A结) + list(B结))):
         甲, 乙 = a组.get(组键, []), b组.get(组键, [])
+        A该表, B该表 = A结.get(组键) or {}, B结.get(组键) or {}
         if _口径冲突(甲, 乙):
             清单 += _整组未对应(甲, 乙, "口径冲突")
             continue
-        if not 甲 or not 乙:
-            if not 甲:
-                清单 += _整组未对应(甲, 乙, "仅B侧有")
-                continue
-            B该表 = B结.get(组键)
-            if (B该表 or {}).get("空名单") and _完整性好(B该表):
-                # B 明确交付“本期无行”：A 的名单项整项清空；固定项不清，保留原值
-                for r in 甲:
-                    if r.get("角色") == "项标签" or r.get("序号") is not None:
-                        清单.append(_项(r, None, "清尾", None))
-                    else:
-                        清单.append(_项(r, None, "未对应", "仅A侧有"))
-                continue
+        if A该表.get("例外未执行") or B该表.get("例外未执行"):
+            清单 += _整组未对应(甲, 乙, "例外未执行")     # 例外执行不了，整表不许自动搬
+            continue
+        if A该表.get("项标签缺失") or B该表.get("项标签缺失"):
+            清单 += _整组未对应(甲, 乙, "列标签缺失")     # 名字写不进去，就不搬数
+            continue
+        if not 甲:
+            清单 += _整组未对应(甲, 乙, "仅B侧有")
+            continue
+        if not 乙 and not _完整性好(B该表):
             清单 += _整组未对应(甲, 乙, "仅A侧有")
             continue
-        if _需加项(甲, 乙):
-            清单 += _整组未对应(甲, 乙, "需加项")
+
+        a项, b项 = _按项(甲), _按项(乙)
+        if len(b项) > len(a项):
+            清单 += _整组未对应(甲, 乙, "需加项")         # 项数按完整项清单，不按物理行列
             continue
-        清单 += _一组配对(甲, 乙, _完整性好(B结.get(组键)))
+        a名单 = [k for k in _有序项(a项) if _是名单项(a项[k])]
+        b名单 = [k for k in _有序项(b项) if _是名单项(b项[k])]
+        清尾项 = set()
+        if len(b名单) < len(a名单) and _完整性好(B该表):
+            明确零项 = bool(b名单) or bool(B该表.get("空名单"))
+            if 明确零项:
+                清尾项 = set(a名单[len(b名单):])           # 只清尾部多出来的名单项
+        清单 += _配对(甲, 乙, 清尾项)
     return 清单

@@ -1,5 +1,5 @@
 # coding: utf-8
-"""写回：期间标题更新构造（按该表真实原句）、桥接 update 封装。"""
+"""写回：期间标题更新构造（按该表真实原句与自己的命名区域）、桥接 update 封装。"""
 from .桥接 import 更新 as 调用桥接更新
 
 
@@ -10,54 +10,110 @@ def _中文日期(文本):
     return f"{y}年{int(m)}月{int(d)}日"
 
 
-def _表日期(合集: list) -> dict:
-    """按「科目＋表名」收集该表用到的期间日期（未知不算）。"""
-    出 = {}
-    for r in 合集:
-        d = str((r.get("维度值") or {}).get("期间实际") or "").strip()
-        if not d or d == "未知":
-            continue
-        出.setdefault((r.get("科目") or "", r.get("表名") or ""), set()).add(d)
-    return 出
+def _段落们(表: dict) -> list:
+    """把上下文里这段表的原文摊成逐段文字。
 
-
-def 构造标题更新(对应清单: list, A合集: list, 上下文: dict) -> tuple:
-    """返回（标题更新列表, 定位失败的表清单）。
-
-    需不需要改标题，只看这张表两侧的期间日期是否不同，不看槽位名里有没有“标题”两个字。
-    该表上下文里找不到唯一一句旧日期时，这张表列为失败——调用方必须整表不换数，
-    不许留下“旧标题 + 新数字”。
+    真实提取产出的 chapter_context 是段落列表，不是一整个字符串；
+    直接 str(列表) 会带出方括号和引号，桥接就找不到原句。
     """
-    a日期 = _表日期(A合集)
-    b日期 = {}
+    段 = []
+    标题 = 表.get("title")
+    if 标题:
+        段.append(str(标题))
+    for b in 表.get("preceding_blocks") or []:
+        if isinstance(b, dict) and b.get("text"):
+            段.append(str(b["text"]))
+        elif isinstance(b, str) and b:
+            段.append(b)
+    for u in 表.get("unit_text_candidates") or []:
+        if u:
+            段.append(str(u))
+    章 = 表.get("chapter_context")
+    if isinstance(章, (list, tuple)):
+        段 += [str(x) for x in 章 if x]
+    elif 章:
+        段 += [x for x in str(章).splitlines() if x]
+    return [x for x in 段 if x and x != "None"]
+
+
+def _换期映射(对应清单: list, A合集: list) -> dict:
+    """按「科目＋表名」收集（旧日期→新日期），期间角色各自对应。
+
+    同一角色出现两个不同日期，说明这张表本身有多套期间且识别没分清，不猜。
+    """
     a按格 = {r.get("格"): r for r in A合集}
+    出 = {}
     for 项 in 对应清单:
         if 项.get("状态") != "对应" or not 项.get("采用来源日期"):
             continue
         甲 = a按格.get(项.get("a格")) or {}
+        维度 = 甲.get("维度值") or {}
+        旧 = str(维度.get("期间实际") or "").strip()
+        新 = str(项.get("采用来源日期") or "").strip()
+        角色 = str(维度.get("期间角色") or "未知")
+        if not 旧 or 旧 == "未知" or not 新:
+            continue
         键 = (甲.get("科目") or "", 甲.get("表名") or "")
-        b日期.setdefault(键, set()).add(str(项["采用来源日期"]).strip())
+        出.setdefault(键, {}).setdefault(角色, set()).add((旧, 新))
+    return 出
+
+
+def 构造标题更新(对应清单: list, A合集: list, 上下文: dict, A结构=None) -> tuple:
+    """返回（标题更新列表, 定位失败的表清单）。
+
+    需不需要改标题，看这张表两侧的期间日期是否不同，不看槽位名里有没有“标题”两个字。
+    定位顺序：先按这张表自己的命名区域找上下文段落，找不到唯一原句就列为失败——
+    调用方必须整表不换数，不许留下“旧标题 + 新数字”。
+    """
+    换期 = _换期映射(对应清单, A合集)
+    区域表 = {(t.get("科目") or "", t.get("表名") or ""): t.get("区域")
+           for t in (A结构 or []) if t.get("区域")}
     表们 = (上下文 or {}).get("tables", [])
     更新, 失败 = [], []
-    for 键 in a日期:
-        旧组, 新组 = a日期.get(键, set()), b日期.get(键, set())
-        if len(旧组) != 1 or len(新组) != 1:
-            continue                                   # 日期不唯一，判断不了，不动标题
-        旧, 新 = next(iter(旧组)), next(iter(新组))
-        if 旧 == 新:
-            continue                                   # 两边同一期，标题不用改
-        旧文, 新文 = _中文日期(旧), _中文日期(新)
-        候选 = [t for t in 表们 if 旧文 in str(t.get("chapter_context", ""))]
-        if len(候选) != 1:
-            失败.append({"科目": 键[0], "表名": 键[1],
-                       "原因": "原句找不到" if not 候选 else "原句不唯一",
-                       "旧日期": 旧, "新日期": 新})
+    for 键, 角色表 in 换期.items():
+        替换, 坏 = {}, None
+        for 角色, 对 in 角色表.items():
+            if len(对) != 1:
+                坏 = f"期间「{角色}」的日期不唯一"
+                break
+            旧, 新 = next(iter(对))
+            if 旧 == 新:
+                continue
+            if 旧 in 替换 and 替换[旧] != 新:
+                坏 = "同一旧日期对应多个新日期"
+                break
+            替换[旧] = 新
+        if 坏:
+            失败.append({"科目": 键[0], "表名": 键[1], "原因": 坏})
             continue
-        表 = 候选[0]
-        章 = str(表.get("chapter_context", ""))
-        段 = next((p for p in 章.splitlines() if 旧文 in p), 章)
-        更新.append({"range_name": 表.get("range_name"), "old_text": 段,
-                   "text": 段.replace(旧文, 新文)})
+        if not 替换:
+            continue                                   # 两边同一期，标题不用改
+        区域 = 区域表.get(键)
+        表 = next((t for t in 表们 if t.get("range_name") == 区域), None) if 区域 else None
+        if 表 is None:
+            候选 = [t for t in 表们
+                  if any(_中文日期(旧) in 段 for 旧 in 替换 for 段 in _段落们(t))]
+            if len(候选) != 1:
+                失败.append({"科目": 键[0], "表名": 键[1],
+                           "原因": "原句找不到" if not 候选 else "原句不唯一"})
+                continue
+            表 = 候选[0]
+        段们 = _段落们(表)
+        命中 = [段 for 段 in 段们 if any(_中文日期(旧) in 段 for 旧 in 替换)]
+        if not 命中:
+            失败.append({"科目": 键[0], "表名": 键[1], "原因": "原句找不到"})
+            continue
+        if len(命中) > 1:
+            失败.append({"科目": 键[0], "表名": 键[1], "原因": "原句不唯一"})
+            continue
+        原 = 命中[0]
+        新文 = 原
+        for 旧, 新 in 替换.items():
+            新文 = 新文.replace(_中文日期(旧), _中文日期(新))
+        if 新文 == 原:
+            失败.append({"科目": 键[0], "表名": 键[1], "原因": "原句没变"})
+            continue
+        更新.append({"range_name": 表.get("range_name"), "old_text": 原, "text": 新文})
     return 更新, 失败
 
 

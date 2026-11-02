@@ -21,6 +21,8 @@ def md5(p):
     return hashlib.md5(Path(p).read_bytes()).hexdigest()
 
 
+
+
 def 提取到(tmp_path):
     d = tmp_path / "任务"
     d.mkdir()
@@ -28,9 +30,13 @@ def 提取到(tmp_path):
     return d
 
 
+
+
 def 回读(d, 名):
     提取(str(d / 名), str(d / "回读.xlsx"), str(d / "回读连.docx"), str(d / "回读上下文.json"))
     return load_workbook(d / "回读.xlsx")
+
+
 
 
 def test_提取命名区域与上下文(tmp_path):
@@ -40,6 +46,8 @@ def test_提取命名区域与上下文(tmp_path):
     ctx = json.loads((d / "上下文.json").read_text(encoding="utf-8-sig"))
     assert ctx["tables"][0]["range_name"] == "TA_001"
     assert "chapter_context" in ctx["tables"][0]
+
+
 
 
 def test_普通值回写并回读核对(tmp_path):
@@ -53,6 +61,8 @@ def test_普通值回写并回读核对(tmp_path):
     assert 结果表["sheet1"]["C2"].value == "新值"       # 实际写入
     assert 结果表["sheet1"]["B2"].value != "新值"       # 旁格不动（C2 之外）
     assert md5(样本) == 前                              # 原件哈希不变
+
+
 
 
 def test_增行操作(tmp_path):
@@ -70,6 +80,8 @@ def test_增行操作(tmp_path):
     更新(str(d / "带连接.docx"), str(d / "改后.xlsx"), str(d / "新副本.docx"), operations=ops)
     结果表 = 回读(d, "新副本.docx")
     assert 结果表["sheet1"]["B3"].value == "新增"       # 新行内容写入正确位置
+
+
 
 
 def test_删行操作(tmp_path):
@@ -101,6 +113,8 @@ def test_删行操作(tmp_path):
         assert 实际[坐标].value == 值, f"{坐标} 回读不一致：期望 {值!r}，实际 {实际[坐标].value!r}"
 
 
+
+
 def test_命名区域缺失报错(tmp_path):
     d = 提取到(tmp_path)
     wb = Workbook(); wb.active.title = "sheet1"; wb.active["B2"] = "x"
@@ -110,7 +124,11 @@ def test_命名区域缺失报错(tmp_path):
     assert "命名区域" in str(e.value)
 
 
+
+
 # —— 2026-11-02 追加：⑩ 多区域下删中间行、⑪ 跨区域明确报错 ——
+
+
 
 
 def test_六十六区域下删中间表一行_序号相对该表(tmp_path):
@@ -136,6 +154,8 @@ def test_六十六区域下删中间表一行_序号相对该表(tmp_path):
     ops = 生成结构操作(基, 改)
     assert ops == [{"range_name": "TA_030", "axis": "row", "action": "delete",
                     "index": 1, "count": 1}]          # 相对区首行得 1，相对工作表会得 152
+
+
 
 
 def test_跨两个命名区域的改动明确报错(tmp_path):

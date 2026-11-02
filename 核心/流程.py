@@ -1,5 +1,11 @@
 # coding: utf-8
-"""总流程编排：提取→识别A→识别B→比对→搬运→写回→回读，接续索引逐步登记。"""
+"""总流程编排：提取→识别A→识别B→比对→搬运→写回→回读，接续索引逐步登记。
+
+三条保护写在流程里：
+- 每个产物一保存就登记路径和哈希；文件被人改过、或没有可信记录，一律另存不覆盖。
+- 任务开始登记输入指纹（三个输入的路径与哈希、数据表工作表）；续跑对不上就拒绝，不混用旧结果。
+- 某张表回写失败时，把那张表的变更恢复原值再交付其余表，绝不因为一张表全盘作废。
+"""
 import hashlib
 import json
 from datetime import datetime
@@ -27,14 +33,18 @@ def _哈希(路径) -> str:
 
 
 def _避让(路径: Path, 旧哈希):
-    """产物被人改过就不覆盖：另存带时间戳的新文件，原文件留着。"""
-    if not 旧哈希:
+    """产物被人改过、或者没有可信记录，都不覆盖：另存带时间戳的新文件，原文件留着。"""
+    if not 路径.exists():
         return 路径, False
-    现在 = _哈希(路径)
-    if not 现在 or 现在 == 旧哈希:
+    if 旧哈希 and _哈希(路径) == 旧哈希:
         return 路径, False
     新 = 路径.with_name(f"{路径.stem}_人工改过_{datetime.now():%Y%m%d_%H%M%S}{路径.suffix}")
     return 新, True
+
+
+def _登记(索引: dict, 名: str, 路径) -> None:
+    索引.setdefault("产物", {})[名] = str(路径)
+    索引.setdefault("产物哈希", {})[名] = _哈希(路径)
 
 
 def _读jsonl(路径):
@@ -55,13 +65,54 @@ def _指定工作表(输入: dict):
     return [值] if isinstance(值, str) else list(值)
 
 
+def _输入指纹(输入: dict) -> dict:
+    """续跑必须认得出“还是不是同一个任务”：路径换了、内容换了、工作表换了，都不许复用。"""
+    return {名: {"路径": str(输入.get(键) or ""), "哈希": _哈希(输入.get(键))}
+            for 名, 键 in (("word", "word"), ("b表", "b表"), ("金标准", "金标准"))} | \
+           {"b工作表": _指定工作表(输入)}
+
+
+def _指纹差异(旧: dict, 新: dict) -> list:
+    差 = []
+    for 名 in ("word", "b表", "金标准"):
+        a, b = (旧 or {}).get(名) or {}, (新 or {}).get(名) or {}
+        if a.get("路径") != b.get("路径"):
+            差.append(f"{名} 路径不同")
+        elif a.get("哈希") != b.get("哈希"):
+            差.append(f"{名} 文件内容已变")
+    if (旧 or {}).get("b工作表") != (新 or {}).get("b工作表"):
+        差.append("数据表工作表不同")
+    return 差
+
+
+def _错误里的区域(消息: str, 区域到组: dict):
+    for 区域 in 区域到组:
+        if 区域 and 区域 in 消息:
+            return 区域
+    return None
+
+
 def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     运行目录 = Path(运行目录)
     运行目录.mkdir(parents=True, exist_ok=True)
     索引 = 读索引(运行目录) or {"步骤": "extract", "已完成范围": [], "产物": {}}
     产物 = 索引.setdefault("产物", {})
+
+    指纹 = _输入指纹(输入)
+    旧指纹 = 索引.get("输入指纹")
+    if 旧指纹:
+        差 = _指纹差异(旧指纹, 指纹)
+        if 差:
+            raise RuntimeError("续跑输入与原任务不一致（" + "；".join(差) + "）："
+                               "请新建任务，不要复用旧结果")
+    索引["输入指纹"] = 指纹
+    写索引(运行目录, 索引)
+
     if "表A" not in 产物:
-        产物.update(提取任务(输入["word"], 运行目录))
+        for 键, 值 in 提取任务(输入["word"], 运行目录).items():
+            产物[键] = 值
+        索引 = 读索引(运行目录) or 索引      # 提取里写了桥接提示，重新读，别被旧快照覆盖
+        索引["产物"].update(产物)
         索引["步骤"] = "identify_a"
         写索引(运行目录, 索引)
     上下文 = json.loads(Path(产物["上下文"]).read_text(encoding="utf-8-sig"))
@@ -82,16 +133,17 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     a记录 = _读jsonl(运行目录 / "A合集.jsonl")
     b记录 = _读jsonl(运行目录 / "B合集.jsonl")
     结构 = _读jsonl(运行目录 / "结构清单.jsonl")
-    清单 = 建立对应(a记录, b记录,
-                 [x for x in 结构 if x.get("侧") == "A"],
-                 [x for x in 结构 if x.get("侧") == "B"])
+    A结构 = [x for x in 结构 if x.get("侧") == "A"]
+    B结构 = [x for x in 结构 if x.get("侧") == "B"]
+    清单 = 建立对应(a记录, b记录, A结构, B结构)
     _写jsonl(运行目录 / "对应清单.jsonl", 清单)
     索引["步骤"] = "carry"
     写索引(运行目录, 索引)
 
     变更, 问题 = 生成更新表({}, 清单, b记录, a记录)
+    问题 = _读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl") + 问题
     a按格 = {r.get("格"): r for r in a记录}
-    标题更新, 标题失败 = 构造标题更新(清单, a记录, 上下文)
+    标题更新, 标题失败 = 构造标题更新(清单, a记录, 上下文, A结构)
     if 标题失败:
         # 标题改不了的表，这张表一个数都不换：不留下“旧标题 + 新数字”
         失败表 = {(x["科目"], x["表名"]) for x in 标题失败}
@@ -100,15 +152,47 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
         问题 = 问题 + [{"原因": "标题改不了，该表不换数（" + x["原因"] + "）",
                       "科目": x["科目"], "表名": x["表名"]} for x in 标题失败]
     _写jsonl(运行目录 / "问题清单.jsonl", 问题)
+
     已录哈希 = 索引.get("产物哈希") or {}
-    更新表路径, _改1 = _避让(运行目录 / "更新后附注表格.xlsx", 已录哈希.get("更新后附注表格"))
+    更新表路径, 改1 = _避让(运行目录 / "更新后附注表格.xlsx", 已录哈希.get("更新后附注表格"))
     保存更新表(产物["表A"], 变更, 更新表路径)
+    _登记(索引, "更新后附注表格", 更新表路径)      # 一保存就登记，中途失败也不留“无记录产物”
+    if 改1:
+        问题.append({"原因": "原更新表被改过，已另存新文件，原文件保留",
+                    "路径": str(更新表路径)})
+        _写jsonl(运行目录 / "问题清单.jsonl", 问题)
     索引["步骤"] = "writeback"
     写索引(运行目录, 索引)
 
-    Word路径, _改2 = _避让(运行目录 / "Word新副本.docx", 已录哈希.get("Word新副本"))
-    写回Word(产物["带连接Word"], 更新表路径, Word路径,
-          operations=[], caption_updates=标题更新)
+    区域到组 = {(x.get("区域") or ""): (x.get("科目") or "", x.get("表名") or "")
+             for x in A结构 if x.get("区域")}
+    Word路径, 改2 = _避让(运行目录 / "Word新副本.docx", 已录哈希.get("Word新副本"))
+    撤回 = set()
+    while True:
+        try:
+            写回Word(产物["带连接Word"], 更新表路径, Word路径,
+                  operations=[], caption_updates=标题更新)
+            break
+        except Exception as e:
+            区域 = _错误里的区域(str(e), 区域到组)
+            if not 区域 or 区域 in 撤回:
+                raise
+            撤回.add(区域)                       # 这张表写不进去：恢复原值，其余照常交付
+            组 = 区域到组[区域]
+            变更 = {格: 值 for 格, 值 in 变更.items()
+                    if (a按格.get(格, {}).get("科目"), a按格.get(格, {}).get("表名")) != 组}
+            标题更新 = [u for u in 标题更新 if u.get("range_name") != 区域]
+            保存更新表(产物["表A"], 变更, 更新表路径)
+            _登记(索引, "更新后附注表格", 更新表路径)
+            问题.append({"原因": "该表回写失败，已保持原值，其余表照常交付",
+                        "区域": 区域, "科目": 组[0], "表名": 组[1], "错误": str(e)[:300]})
+            _写jsonl(运行目录 / "问题清单.jsonl", 问题)
+            写索引(运行目录, 索引)
+    _登记(索引, "Word新副本", Word路径)
+    if 改2:
+        问题.append({"原因": "原 Word 新副本被改过，已另存新文件，原文件保留",
+                    "路径": str(Word路径)})
+        _写jsonl(运行目录 / "问题清单.jsonl", 问题)
     索引["步骤"] = "readback"
     写索引(运行目录, 索引)
 
@@ -116,6 +200,7 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     _写jsonl(运行目录 / "回读记录.jsonl", 差异)      # 差异文件保留，不删证据
     索引["产物哈希"] = {"更新后附注表格": _哈希(更新表路径), "Word新副本": _哈希(Word路径)}
     索引["回读差异"] = len(差异)
+    索引["撤回表"] = sorted(撤回)
     索引["步骤"] = "回读不一致" if 差异 else "done"   # 有差异不许标完成
     索引["产物"].update({"更新后附注表格": str(更新表路径),
                    "Word新副本": str(Word路径)})
@@ -135,4 +220,3 @@ def 人工回写(输入: dict) -> dict:
     if 输入.get("基准表A") and 输入.get("excel"):
         ops = 生成结构操作(输入["基准表A"], 输入["excel"])
     return 写回Word(输入["带连接word"], 输入["excel"], 输出, operations=ops)
-

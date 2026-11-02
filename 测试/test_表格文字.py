@@ -21,6 +21,8 @@ def 表头链(快照, 表名, 格):
     return tuple(链)
 
 
+
+
 def test_表头归属与值挂对(tmp_path):
     wb = Workbook(); ws = wb.active; ws.title = "s1"
     ws["A1"] = "行\\列"; ws["B1"] = "账面余额"; ws["C1"] = "坏账准备"
