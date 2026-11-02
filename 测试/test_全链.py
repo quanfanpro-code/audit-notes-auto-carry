@@ -88,3 +88,226 @@ def test_无配置时停在待答复并写出材料(tmp_path, monkeypatch):
     材料 = Path(状态["待答复"][0]) / "材料.txt"
     assert 材料.is_file() and "整份文件的表格文字" in 材料.read_text(encoding="utf-8")
 
+
+# —— R7：标题改不了整表不换数、回读差异不算完成、人工改过的产物不被覆盖 ——
+
+def _读值(路径, 表="sheet1", 格="A1"):
+    wb = load_workbook(路径)
+    try:
+        return wb[表][格].value
+    finally:
+        wb.close()
+
+
+def _装stub(monkeypatch, 上下文段="本表按账龄披露，无日期"):
+    """A、B 两遍识别都能跑通；A 的期间是 2024 年、B 是 2025 年，用来触发标题检查。"""
+    def 假提取(word, excel, 带连接word, 上下文):
+        wb = Workbook(); wb.active.title = "sheet1"
+        wb.active["A1"] = 9 if "新副本" in str(word) else 100
+        wb.save(excel)
+        Path(带连接word).write_text("连接体", encoding="utf-8")
+        Path(上下文).write_text(json.dumps(
+            {"tables": [{"range_name": "TA_001", "chapter_context": 上下文段}]},
+            ensure_ascii=False), encoding="utf-8")
+        return {"ok": True, "table_count": 1, "warnings": []}
+
+    def 假模型(配置, 指令, 材料, 调用目录):
+        if 指令.startswith("把整份文件"):
+            return '{"划分":[{"行范围":[1,1],"科目":"货币资金"}]}'
+        if 指令.startswith("在第一遍"):
+            return ('{"表":[{"行范围":[1,1],"科目":"货币资金","表名":"余额构成",'
+                    '"表组":"G1","续表序":1}]}')
+        日期 = "2025-12-31" if "word附注" in 材料 else "2024-12-31"
+        return ('{"列":[{"列":"A","路径":"期末余额","角色":"数据列","期间角色":"本期期末",'
+                '"期间实际":"%s"}],'
+                '"行":[{"行":1,"名字":"库存现金","角色":"数据","序号":null,'
+                '"槽位":{"A":"C-N006-T001-S002"}}],'
+                '"作用范围":{"币种":"人民币","单位":"元"},"空名单":[],"例外":[]}' % 日期)
+
+    def 假更新(word, excel, output, operations, caption_updates):
+        Path(output).write_text("新Word", encoding="utf-8")
+        return {"ok": True, "written_cells": 1, "errors": []}
+
+    monkeypatch.setattr("核心.提取.调用桥接提取", 假提取)
+    monkeypatch.setattr("核心.识别.调用识别", 假模型)
+    monkeypatch.setattr("核心.写回.调用桥接更新", 假更新)
+    monkeypatch.setattr("核心.回读.调用桥接提取", 假提取)
+
+
+def test_标题定位不到就整表不换数(tmp_path, monkeypatch):
+    _装stub(monkeypatch)                       # 上下文里没有“2024年12月31日”这句
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
+                tmp_path / "任务R7a", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    assert 状态["步骤"] == "done"
+    值 = _读值(状态["产物"]["更新后附注表格"])
+    assert 值 == 100                            # 标题改不了，这张表一个数都不换
+    目录 = Path(状态["产物"]["更新后附注表格"]).parent
+    assert '"对应"' in (目录 / "对应清单.jsonl").read_text(encoding="utf-8")   # 确实配上了，只是标题改不了
+    问题 = (目录 / "问题清单.jsonl").read_text(encoding="utf-8")
+    assert "标题改不了" in 问题
+
+
+def test_标题定位得到就替换(tmp_path, monkeypatch):
+    _装stub(monkeypatch, "本表期末指2024年12月31日，金额单位为人民币元")
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
+                tmp_path / "任务R7b", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    值 = _读值(状态["产物"]["更新后附注表格"])
+    assert 值 == 9                              # 标题能定位，这张表照常换数
+    更新 = json.loads((Path(状态["产物"]["更新后附注表格"]).parent / "接续索引.json")
+                    .read_text(encoding="utf-8-sig"))
+    assert 更新["步骤"] == "done"
+
+
+def test_回读差异不算完成(tmp_path, monkeypatch):
+    _装stub(monkeypatch, "本表期末指2024年12月31日")
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    monkeypatch.setattr("核心.流程.回读验证",
+                    lambda *a, **k: [{"格": "sheet1!A1", "期望": 9, "实际": 100}])
+    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
+                tmp_path / "任务R7c", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    assert 状态["步骤"] == "回读不一致"           # 有差异不许标完成
+    assert 状态["回读差异"] == 1
+    差异 = (tmp_path / "任务R7c" / "回读记录.jsonl").read_text(encoding="utf-8").strip()
+    assert "sheet1!A1" in 差异                    # 差异文件保留，不删证据
+
+
+def test_人工改过的产物不被覆盖(tmp_path, monkeypatch):
+    _装stub(monkeypatch, "本表期末指2024年12月31日")
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    运行目录 = tmp_path / "任务R7d"
+    输入 = {"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))}
+    运行任务(输入, 运行目录, {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+
+    产物 = 运行目录 / "更新后附注表格.xlsx"
+    改后 = load_workbook(产物)
+    try:
+        改后["sheet1"]["A1"] = 999
+        改后.save(产物)
+    finally:
+        改后.close()
+
+    运行任务(输入, 运行目录, {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    assert _读值(产物) == 999                          # 人工成果没被覆盖
+    assert list(运行目录.glob("更新后附注表格_人工改过_*.xlsx"))  # 另存了新文件
+
+
+# —— R7：标题改不了整表不换数、回读差异不算完成、人工改过的产物不被覆盖 ——
+
+def _读值(路径, 表="sheet1", 格="A1"):
+    wb = load_workbook(路径)
+    try:
+        return wb[表][格].value
+    finally:
+        wb.close()
+
+
+def _装stub(monkeypatch, 上下文段="本表按账龄披露，无日期"):
+    """A、B 两遍识别都能跑通；A 的期间是 2024 年、B 是 2025 年，用来触发标题检查。"""
+    def 假提取(word, excel, 带连接word, 上下文):
+        wb = Workbook(); wb.active.title = "sheet1"
+        wb.active["A1"] = 9 if "新副本" in str(word) else 100
+        wb.save(excel)
+        Path(带连接word).write_text("连接体", encoding="utf-8")
+        Path(上下文).write_text(json.dumps(
+            {"tables": [{"range_name": "TA_001", "chapter_context": 上下文段}]},
+            ensure_ascii=False), encoding="utf-8")
+        return {"ok": True, "table_count": 1, "warnings": []}
+
+    def 假模型(配置, 指令, 材料, 调用目录):
+        if 指令.startswith("把整份文件"):
+            return '{"划分":[{"行范围":[1,1],"科目":"货币资金"}]}'
+        if 指令.startswith("在第一遍"):
+            return ('{"表":[{"行范围":[1,1],"科目":"货币资金","表名":"余额构成",'
+                    '"表组":"G1","续表序":1}]}')
+        日期 = "2025-12-31" if "word附注" in 材料 else "2024-12-31"
+        return ('{"列":[{"列":"A","路径":"期末余额","角色":"数据列","期间角色":"本期期末",'
+                '"期间实际":"%s"}],'
+                '"行":[{"行":1,"名字":"库存现金","角色":"数据","序号":null,'
+                '"槽位":{"A":"C-N006-T001-S002"}}],'
+                '"作用范围":{"币种":"人民币","单位":"元"},"空名单":[],"例外":[]}' % 日期)
+
+    def 假更新(word, excel, output, operations, caption_updates):
+        Path(output).write_text("新Word", encoding="utf-8")
+        return {"ok": True, "written_cells": 1, "errors": []}
+
+    monkeypatch.setattr("核心.提取.调用桥接提取", 假提取)
+    monkeypatch.setattr("核心.识别.调用识别", 假模型)
+    monkeypatch.setattr("核心.写回.调用桥接更新", 假更新)
+    monkeypatch.setattr("核心.回读.调用桥接提取", 假提取)
+
+
+def test_标题定位不到就整表不换数(tmp_path, monkeypatch):
+    _装stub(monkeypatch)                       # 上下文里没有“2024年12月31日”这句
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
+                tmp_path / "任务R7a", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    assert 状态["步骤"] == "done"
+    值 = _读值(状态["产物"]["更新后附注表格"])
+    assert 值 == 100                            # 标题改不了，这张表一个数都不换
+    目录 = Path(状态["产物"]["更新后附注表格"]).parent
+    assert '"对应"' in (目录 / "对应清单.jsonl").read_text(encoding="utf-8")   # 确实配上了，只是标题改不了
+    问题 = (目录 / "问题清单.jsonl").read_text(encoding="utf-8")
+    assert "标题改不了" in 问题
+
+
+def test_标题定位得到就替换(tmp_path, monkeypatch):
+    _装stub(monkeypatch, "本表期末指2024年12月31日，金额单位为人民币元")
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
+                tmp_path / "任务R7b", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    值 = _读值(状态["产物"]["更新后附注表格"])
+    assert 值 == 9                              # 标题能定位，这张表照常换数
+    更新 = json.loads((Path(状态["产物"]["更新后附注表格"]).parent / "接续索引.json")
+                    .read_text(encoding="utf-8-sig"))
+    assert 更新["步骤"] == "done"
+
+
+def test_回读差异不算完成(tmp_path, monkeypatch):
+    _装stub(monkeypatch, "本表期末指2024年12月31日")
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    monkeypatch.setattr("核心.流程.回读验证",
+                    lambda *a, **k: [{"格": "sheet1!A1", "期望": 9, "实际": 100}])
+    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
+                tmp_path / "任务R7c", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    assert 状态["步骤"] == "回读不一致"           # 有差异不许标完成
+    assert 状态["回读差异"] == 1
+    差异 = (tmp_path / "任务R7c" / "回读记录.jsonl").read_text(encoding="utf-8").strip()
+    assert "sheet1!A1" in 差异                    # 差异文件保留，不删证据
+
+
+def test_人工改过的产物不被覆盖(tmp_path, monkeypatch):
+    _装stub(monkeypatch, "本表期末指2024年12月31日")
+    b路径 = tmp_path / "b.xlsx"
+    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.save(b路径)
+    运行目录 = tmp_path / "任务R7d"
+    输入 = {"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))}
+    运行任务(输入, 运行目录, {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+
+    产物 = 运行目录 / "更新后附注表格.xlsx"
+    改后 = load_workbook(产物)
+    try:
+        改后["sheet1"]["A1"] = 999
+        改后.save(产物)
+    finally:
+        改后.close()
+
+    运行任务(输入, 运行目录, {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
+    assert _读值(产物) == 999                          # 人工成果没被覆盖
+    assert list(运行目录.glob("更新后附注表格_人工改过_*.xlsx"))  # 另存了新文件

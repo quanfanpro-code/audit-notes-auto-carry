@@ -1,6 +1,8 @@
 # coding: utf-8
 """总流程编排：提取→识别A→识别B→比对→搬运→写回→回读，接续索引逐步登记。"""
+import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 
 from .比对 import 建立对应
@@ -11,6 +13,28 @@ from .接续 import 读索引, 写索引
 from .搬运 import 生成更新表, 保存更新表
 from .结构维护 import 生成结构操作
 from .识别 import 识别一侧
+
+
+def _哈希(路径) -> str:
+    p = Path(路径)
+    if not p.is_file():
+        return ""
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        for 块 in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(块)
+    return h.hexdigest()
+
+
+def _避让(路径: Path, 旧哈希):
+    """产物被人改过就不覆盖：另存带时间戳的新文件，原文件留着。"""
+    if not 旧哈希:
+        return 路径, False
+    现在 = _哈希(路径)
+    if not 现在 or 现在 == 旧哈希:
+        return 路径, False
+    新 = 路径.with_name(f"{路径.stem}_人工改过_{datetime.now():%Y%m%d_%H%M%S}{路径.suffix}")
+    return 新, True
 
 
 def _读jsonl(路径):
@@ -66,31 +90,49 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     写索引(运行目录, 索引)
 
     变更, 问题 = 生成更新表({}, 清单, b记录, a记录)
+    a按格 = {r.get("格"): r for r in a记录}
+    标题更新, 标题失败 = 构造标题更新(清单, a记录, 上下文)
+    if 标题失败:
+        # 标题改不了的表，这张表一个数都不换：不留下“旧标题 + 新数字”
+        失败表 = {(x["科目"], x["表名"]) for x in 标题失败}
+        变更 = {格: 值 for 格, 值 in 变更.items()
+                if (a按格.get(格, {}).get("科目"), a按格.get(格, {}).get("表名")) not in 失败表}
+        问题 = 问题 + [{"原因": "标题改不了，该表不换数（" + x["原因"] + "）",
+                      "科目": x["科目"], "表名": x["表名"]} for x in 标题失败]
     _写jsonl(运行目录 / "问题清单.jsonl", 问题)
-    更新表路径 = 运行目录 / "更新后附注表格.xlsx"
+    已录哈希 = 索引.get("产物哈希") or {}
+    更新表路径, _改1 = _避让(运行目录 / "更新后附注表格.xlsx", 已录哈希.get("更新后附注表格"))
     保存更新表(产物["表A"], 变更, 更新表路径)
     索引["步骤"] = "writeback"
     写索引(运行目录, 索引)
 
-    标题更新 = 构造标题更新(清单, a记录, 上下文)
-    写回Word(产物["带连接Word"], 更新表路径, 运行目录 / "Word新副本.docx",
+    Word路径, _改2 = _避让(运行目录 / "Word新副本.docx", 已录哈希.get("Word新副本"))
+    写回Word(产物["带连接Word"], 更新表路径, Word路径,
           operations=[], caption_updates=标题更新)
     索引["步骤"] = "readback"
     写索引(运行目录, 索引)
 
-    差异 = 回读验证(运行目录 / "Word新副本.docx", 变更, 运行目录 / "回读临时")
-    _写jsonl(运行目录 / "回读记录.jsonl", 差异)
-    索引["步骤"] = "done"
+    差异 = 回读验证(Word路径, 变更, 运行目录 / "回读临时")
+    _写jsonl(运行目录 / "回读记录.jsonl", 差异)      # 差异文件保留，不删证据
+    索引["产物哈希"] = {"更新后附注表格": _哈希(更新表路径), "Word新副本": _哈希(Word路径)}
+    索引["回读差异"] = len(差异)
+    索引["步骤"] = "回读不一致" if 差异 else "done"   # 有差异不许标完成
     索引["产物"].update({"更新后附注表格": str(更新表路径),
-                   "Word新副本": str(运行目录 / "Word新副本.docx")})
+                   "Word新副本": str(Word路径)})
     写索引(运行目录, 索引)
     return 索引
 
 
 def 人工回写(输入: dict) -> dict:
-    """人工直接回写：按真实路径重读用户已保存的 Excel；给基准表A时先推导结构操作。"""
+    """人工直接回写：按真实路径重读用户已保存的 Excel；给基准表A时先推导结构操作。
+
+    输出路径前端叫「输出」、内部叫 output，两种都认，免得字段名对不上白跑一趟。
+    """
+    输出 = 输入.get("output") or 输入.get("输出")
+    if not 输出:
+        raise ValueError("缺少输出路径（输出／output）")
     ops = []
     if 输入.get("基准表A") and 输入.get("excel"):
         ops = 生成结构操作(输入["基准表A"], 输入["excel"])
-    return 写回Word(输入["带连接word"], 输入["excel"], 输入["output"], operations=ops)
+    return 写回Word(输入["带连接word"], 输入["excel"], 输出, operations=ops)
 

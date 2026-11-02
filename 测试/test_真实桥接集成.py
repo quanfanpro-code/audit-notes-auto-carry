@@ -88,6 +88,18 @@ def test_删行操作(tmp_path):
     结果表 = 回读(d, "新副本.docx")
     assert 结果表["sheet1"].max_row < 原行数          # 行确实少了
 
+    改后 = load_workbook(d / "改后.xlsx")["sheet1"]
+    期望 = {坐标: 改后[坐标].value for 坐标 in ("A2", "B2", "C2", "A3", "B3")}
+    实际 = 结果表["sheet1"]
+    for 坐标, 值 in 期望.items():
+        assert 实际[坐标].value == 值, f"{坐标} 回读不一致：期望 {值!r}，实际 {实际[坐标].value!r}"
+
+    改后 = load_workbook(d / "改后.xlsx")["sheet1"]
+    期望 = {坐标: 改后[坐标].value for 坐标 in ("A2", "B2", "C2", "A3", "B3")}
+    实际 = 结果表["sheet1"]
+    for 坐标, 值 in 期望.items():
+        assert 实际[坐标].value == 值, f"{坐标} 回读不一致：期望 {值!r}，实际 {实际[坐标].value!r}"
+
 
 def test_命名区域缺失报错(tmp_path):
     d = 提取到(tmp_path)

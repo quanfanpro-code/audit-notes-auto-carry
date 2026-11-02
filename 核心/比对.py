@@ -162,8 +162,16 @@ def _一组配对(甲: list, 乙: list, 清尾可: bool) -> list:
 
 
 def _整组未对应(甲: list, 乙: list, 原因: str) -> list:
-    清单 = [_项(r, None, "未对应", 原因) for r in 甲 if r.get("角色") != "项标签"]
-    清单 += [_项(None, r, "未对应", 原因) for r in 乙 if r.get("角色") != "项标签"]
+    """整组判不了时也要逐格进清单；项标签另有标记，不算“漏了”。"""
+    清单 = []
+    for r in 甲:
+        if r.get("角色") == "项标签":
+            清单.append(_项(r, None, "不参与", "项标签"))
+        else:
+            清单.append(_项(r, None, "未对应", 原因))
+    for r in 乙:
+        if r.get("角色") != "项标签":
+            清单.append(_项(None, r, "未对应", 原因))
     return 清单
 
 

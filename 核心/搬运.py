@@ -44,6 +44,8 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
     0 照搬；真实空白清空；读取失败或未对应则整项保留原值并列问题。
     """
     b按格 = {r.get("格"): r for r in B合集}
+    b项标签 = {(r.get("科目"), r.get("表名"), r.get("行号")): r
+            for r in B合集 if r.get("角色") == "项标签"}
     if A合集 is None:
         return _逐格(对应清单, b按格)
 
@@ -79,6 +81,15 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
         if 甲.get("角色") != "项标签" and 乙.get("行号") is not None:
             a项到b行[_项键(甲, 条.get("a格"))] = 乙["行号"]
 
+    # 名单项的名字和数字必须一起换：B 侧取不到同项文字，这一项就不许搬
+    for 格, 甲 in a按格.items():
+        键 = _项键(甲, 格)
+        if 甲.get("角色") == "项标签" and 甲.get("序号") is not None:
+            if 键 not in a项到b行 or (键[0], 键[1], a项到b行[键]) not in b项标签:
+                态 = 项态.setdefault(键, {"可搬": True, "清尾": False, "原因": None})
+                态["可搬"] = False
+                态["原因"] = 态["原因"] or "项标签取不到"
+
     变更, 问题 = {}, []
     for 格, 甲 in a按格.items():
         键 = _项键(甲, 格)
@@ -96,9 +107,7 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
             b行 = a项到b行.get(键)
             if b行 is None:
                 continue
-            乙 = next((r for r in B合集
-                       if (r.get("科目"), r.get("表名")) == 键[:2]
-                       and r.get("行号") == b行 and r.get("角色") == "项标签"), None)
+            乙 = b项标签.get((键[0], 键[1], b行))
             if 乙 is None:
                 continue
             变更[格] = "" if 乙.get("原值状态") == "真实空白" else 乙.get("原值")

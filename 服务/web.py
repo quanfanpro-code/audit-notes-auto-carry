@@ -2,6 +2,7 @@
 """本地 WebUI（FastAPI）：任务、结果、设置、人工回写四区；仅监听 127.0.0.1。"""
 import datetime
 import json
+import os
 import subprocess
 import threading
 from pathlib import Path
@@ -63,8 +64,21 @@ def 开始任务(请求: dict):
         raise HTTPException(status_code=400, detail="缺少字段：" + "、".join(缺))
     if 应用.state.状态.get("线程") and 应用.state.状态["线程"].is_alive():
         return {"错误": "已有任务在运行"}
-    运行目录 = 运行根 / ("任务_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
-    配置 = 读取模型配置(应用.state.配置路径) if Path(应用.state.配置路径).is_file() else {}
+    if 请求.get("续跑"):
+        上次 = 应用.state.状态.get("运行目录")
+        if 上次 and Path(上次).is_dir():
+            运行目录 = Path(上次)
+        else:
+            候选 = sorted(p for p in 运行根.glob("任务_*") if p.is_dir())
+            if not 候选:
+                raise HTTPException(status_code=400, detail="没有可续跑的任务")
+            运行目录 = 候选[-1]            # 续跑：沿用原来的目录，不新建
+    else:
+        运行目录 = 运行根 / ("任务_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    try:
+        配置 = 读取模型配置(应用.state.配置路径)
+    except Exception:
+        配置 = {}                                  # 没配过或配置坏了，都按“没配”处理
 
     def 跑():
         try:
@@ -109,7 +123,37 @@ def 结果():
         p = Path(运行目录) / 名
         return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()] if p.is_file() else []
 
-    return {"对应": 读("对应清单.jsonl"), "问题": 读("问题清单.jsonl"), "回读": 读("回读记录.jsonl")}
+    对应 = 读("对应清单.jsonl")
+    原因 = {}
+    for x in 对应:
+        if x.get("状态") == "对应":
+            continue
+        名 = x.get("原因") or "未分类"
+        原因[名] = 原因.get(名, 0) + 1
+    索引 = 读索引(运行目录) or {}
+    产物 = 索引.get("产物") or {}
+    return {"对应": 对应, "问题": 读("问题清单.jsonl"), "回读": 读("回读记录.jsonl"),
+            "摘要": {"对应条数": sum(1 for x in 对应 if x.get("状态") == "对应"),
+                    "清尾条数": sum(1 for x in 对应 if x.get("状态") == "清尾"),
+                    "未对应": 原因,
+                    "回读差异": 索引.get("回读差异", 0),
+                    "步骤": 索引.get("步骤")},
+            "产物": {"运行目录": str(运行目录),
+                    "更新后附注表格": 产物.get("更新后附注表格"),
+                    "Word新副本": 产物.get("Word新副本")}}
+
+
+@应用.post("/api/打开目录")
+def 打开目录(请求: dict):
+    目标 = Path(str(请求.get("路径") or 应用.state.状态.get("运行目录") or ""))
+    if not 目标.exists():
+        return {"ok": False, "错误": "目录不存在"}
+    路径 = 目标 if 目标.is_dir() else 目标.parent
+    try:
+        os.startfile(str(路径))            # 只面向 Windows
+        return {"ok": True, "路径": str(路径)}
+    except Exception as e:
+        return {"ok": False, "错误": str(e)}
 
 
 @应用.get("/api/设置")
@@ -133,12 +177,21 @@ def 存设置(请求: dict):
 @应用.post("/api/设置/测试")
 def 设置测试():
     配置 = 读取模型配置(应用.state.配置路径)
+    if not 配置.get("url"):
+        return {"ok": False, "说明": "还没填 API 地址"}
     try:
         响应 = httpx.get(配置["url"].rstrip("/") + "/models", timeout=15,
                    headers={"Authorization": "Bearer " + 配置.get("api_key", "")})
-        return {"ok": 响应.status_code < 500, "状态码": 响应.status_code}
+        码 = 响应.status_code
+        if 200 <= 码 < 300:
+            return {"ok": True, "状态码": 码, "说明": "连通"}
+        if 码 in (401, 403):
+            return {"ok": False, "状态码": 码, "说明": "密钥无效或没有权限"}
+        if 码 == 404:
+            return {"ok": False, "状态码": 码, "说明": "地址不对，找不到这个接口"}
+        return {"ok": False, "状态码": 码, "说明": "服务端返回错误"}
     except Exception as e:
-        return {"ok": False, "错误": str(e)}
+        return {"ok": False, "错误": str(e), "说明": "连不上"}
 
 
 @应用.post("/api/人工回写")
