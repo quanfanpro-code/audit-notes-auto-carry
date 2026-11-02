@@ -14,8 +14,12 @@ def 加载金标准(主文件路径) -> list[dict]:
 
 
 def 建索引(金标准: list) -> dict:
-    """三层嵌套：{科目: {"序", "表": {表名: {"序", "槽位": [槽位记录]}}}}，另存全部编号集合。"""
-    索引 = {"科目": {}, "编号": set()}
+    """三层嵌套：{科目: {"序", "表": {表名: {"序", "槽位": [槽位记录]}}}}。
+
+    另存全部编号集合与按编号索引，供“编号是否存在”“要不要期间”直接查。
+    候选槽位带齐识别要用的素材（值类型、行列路径、维度），但程序不据此预判性质。
+    """
+    索引 = {"科目": {}, "编号": set(), "按编号": {}}
     for 记录 in 金标准:
         note = 记录.get("note") or {}
         表 = 记录.get("table") or {}
@@ -25,13 +29,18 @@ def 建索引(金标准: list) -> dict:
         科 = 索引["科目"].setdefault(科目名, {"序": note.get("display_order") or 0, "表": {}})
         表项 = 科["表"].setdefault(表名, {"序": 表.get("display_order") or 0, "槽位": []})
         编号 = 记录.get("id")
+        槽 = {"id": 编号,
+              "槽位名": (记录.get("slot") or {}).get("name"),
+              "行路径": list(记录.get("row_path") or []),
+              "列路径": list(记录.get("column_path") or []),
+              "别名": 记录.get("aliases"),
+              "值类型": 记录.get("value_type"),
+              "维度": {d.get("name"): bool(d.get("required"))
+                     for d in (记录.get("dimensions") or []) if d.get("name")}}
+        表项["槽位"].append(槽)
         if 编号:
             索引["编号"].add(编号)
-        表项["槽位"].append({"id": 编号,
-                          "槽位名": (记录.get("slot") or {}).get("name"),
-                          "行路径": list(记录.get("row_path") or []),
-                          "列路径": list(记录.get("column_path") or []),
-                          "别名": 记录.get("aliases")})
+            索引["按编号"][编号] = 槽
     return 索引
 
 
@@ -51,4 +60,15 @@ def 候选槽位(索引: dict, 科目: str, 表名: str) -> list:
 
 
 def 编号存在(索引: dict, 编号) -> bool:
+    """按金标准真实编号判断，不看开头字母：P 类同样有效（实测 1,563 条）。"""
     return bool(编号) and 编号 in 索引["编号"]
+
+
+def 期间必填(索引: dict, 编号) -> bool:
+    """该编号是否要求期间。要求时，期间角色才进配对条件、'未知'才拦。
+
+    一条结论：实测 11,395 条 period 必填，1,422 条没有 period 维度。
+    不存在的编号一律 False（调用方会先判编号缺失）。
+    """
+    槽 = (索引.get("按编号") or {}).get(编号) or {}
+    return bool((槽.get("维度") or {}).get("period"))

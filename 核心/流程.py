@@ -57,7 +57,10 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     索引 = 读索引(运行目录) or 索引
     a记录 = _读jsonl(运行目录 / "A合集.jsonl")
     b记录 = _读jsonl(运行目录 / "B合集.jsonl")
-    清单 = 建立对应(a记录, b记录)
+    结构 = _读jsonl(运行目录 / "结构清单.jsonl")
+    清单 = 建立对应(a记录, b记录,
+                 [x for x in 结构 if x.get("侧") == "A"],
+                 [x for x in 结构 if x.get("侧") == "B"])
     _写jsonl(运行目录 / "对应清单.jsonl", 清单)
     索引["步骤"] = "carry"
     写索引(运行目录, 索引)
