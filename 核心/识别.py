@@ -704,6 +704,10 @@ def 铺格子(结构记录: dict, 问题: list = None) -> list:
 
     记 = []
     数据行号 = {r["行"] for r in 数据行}
+    表头行们 = sorted(r["行"] for r in (结构记录.get("行") or []) if r.get("角色") == "表头")
+    首个数据行 = min(数据行号, default=None)
+    可用表头 = [h for h in 表头行们 if 首个数据行 is None or h < 首个数据行]
+    默认标签行 = 可用表头[0] if len(可用表头) == 1 else None   # 只有一层表头就没有歧义
     列标签行 = {}
     结构记录["项标签缺失"] = False
     if 项方式 == "列":
@@ -712,7 +716,7 @@ def 铺格子(结构记录: dict, 问题: list = None) -> list:
         for 列 in 数据列:
             if 列.get("序号") is None:
                 continue
-            标签行 = 列.get("标签行")
+            标签行 = 列.get("标签行") or 默认标签行
             if 标签行 and 标签行 not in 数据行号:
                 列标签行[str(列.get("列") or "").upper()] = 标签行
         缺 = [c.get("列") for c in 数据列 if c.get("序号") is not None
