@@ -102,6 +102,7 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
 
     变更, 问题 = {}, []
     已记项 = set()
+    清尾已记 = set()
     for 格, 甲 in a按格.items():
         键 = _项键(甲)
         态 = 项态.get(键) or {}
@@ -115,6 +116,10 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
             continue
         if 态.get("清尾"):
             变更[格] = ""                             # 清尾：标签与数字一起空
+            if 键 not in 清尾已记:                     # 每一项都要在问题清单里交代一次
+                清尾已记.add(键)
+                问题.append({"a格": 格, "b格": None,
+                           "原因": "B无此项，已清空，请人工确认是否删行或删列"})
             continue
         if 甲.get("角色") == "项标签":
             if 甲.get("序号") is None:

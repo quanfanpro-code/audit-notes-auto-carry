@@ -51,6 +51,5 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception:
-        记启动("启动失败：
-" + traceback.format_exc())
+        记启动("启动失败：" + traceback.format_exc())
         raise

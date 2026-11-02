@@ -6,10 +6,12 @@
 - 期间角色只在金标准要求期间时才进配对键；不要求期间时，期间不同也照配，原值保留。
 - 序号只对名单项有意义；固定项没有序号，按编号配，顺序不同也能对上。
 - 汇总格再加分组，两个分组的小计不串组。
-- 项数按完整项清单算（含识别失败的占位项），不按物理行列数。
-- 清尾只清名单项，且只清尾部；合计、小计、固定项永远不清尾。
-- 判重使用同一套完整键：不同编号各一格不算重复。
+- 项数按完整名单清单算（含识别失败的占位项），不按物理行列数：固定项、合计各按各的规则办。
+- 清尾只清名单项，且只清尾部；尾巴按识别给的序号认，不按列字母或行号重排。
+- 判重使用同一套完整键，同侧撞键就整表停：不同编号各一格不算重复。
 """
+from openpyxl.utils import column_index_from_string
+
 _口径键 = ("币种", "单位", "期间跨度")
 _完整性键 = ("第一遍覆盖", "第二遍归段", "第三遍逐行", "空名单已声明")
 
@@ -47,9 +49,22 @@ def _按项(记录们: list) -> dict:
 
 
 def _有序项(项表: dict) -> list:
+    """按识别给的序号排序；没有序号的按物理位置。
+
+    列上成名单时位置是列字母，不能拿字符串比大小——"AA" 会排到 "Z" 前面，
+    尾巴就认错了项；这里一律换算成列序号。
+    """
     def 排序键(键):
-        位置 = 键[2]
-        return (键[1], int(位置) if str(位置).isdigit() else 0, str(位置))
+        序号 = next((r.get("序号") for r in 项表[键] if r.get("序号") is not None), None)
+        if 序号 is not None:
+            return (键[1], 0, int(序号), 0)
+        位置 = str(键[2])
+        if 位置.isdigit():
+            return (键[1], 1, int(位置), 0)
+        try:
+            return (键[1], 1, 0, column_index_from_string(位置.upper()))
+        except ValueError:
+            return (键[1], 1, 0, 0)
     return sorted(项表, key=排序键)
 
 
@@ -110,6 +125,21 @@ def _整组未对应(甲: list, 乙: list, 原因: str) -> list:
     return 清单
 
 
+def _重复键(记录们: list, 清尾项: set = frozenset()) -> bool:
+    """同一侧是否出现两组以上的完整配对键——撞键就整表停，不按顺序硬配。"""
+    见 = set()
+    for r in 记录们:
+        if r.get("角色") == "项标签" or r.get("不搬") or _项键(r) in 清尾项:
+            continue
+        if not r.get("槽位") or _期间未知(r):
+            continue                            # 缺编号、期间未知另有专门处理，不算这里
+        键 = _键(r)
+        if 键 in 见:
+            return True
+        见.add(键)
+    return False
+
+
 def _配对(甲: list, 乙: list, 清尾项: set) -> list:
     清单 = []
     a桶, b桶 = {}, {}
@@ -119,6 +149,9 @@ def _配对(甲: list, 乙: list, 清尾项: set) -> list:
             continue
         if r.get("角色") == "项标签":
             清单.append(_项(r, None, "不参与", "项标签"))
+            continue
+        if r.get("不搬"):
+            清单.append(_项(r, None, "未对应", "识别不搬，交人工"))
             continue
         if not r.get("槽位"):
             清单.append(_项(r, None, "未对应", "槽位编号缺失"))
@@ -130,6 +163,9 @@ def _配对(甲: list, 乙: list, 清尾项: set) -> list:
     for r in 乙:
         if r.get("角色") == "项标签":
             continue                           # B 侧项标签由 A 侧那条带出清单，不重复记
+        if r.get("不搬"):
+            清单.append(_项(None, r, "未对应", "识别不搬，交人工"))
+            continue
         if not r.get("槽位"):
             清单.append(_项(None, r, "未对应", "槽位编号缺失"))
             continue
@@ -195,15 +231,18 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
             continue
 
         a项, b项 = _按项(甲), _按项(乙)
-        if len(b项) > len(a项):
-            清单 += _整组未对应(甲, 乙, "需加项")         # 项数按完整项清单，不按物理行列
-            continue
         a名单 = [k for k in _有序项(a项) if _是名单项(a项[k])]
         b名单 = [k for k in _有序项(b项) if _是名单项(b项[k])]
+        if len(b名单) > len(a名单):
+            清单 += _整组未对应(甲, 乙, "需加项")     # 只比名单项数：固定项、合计不占名额
+            continue
         清尾项 = set()
         if len(b名单) < len(a名单) and _完整性好(B该表):
             明确零项 = bool(b名单) or bool(B该表.get("空名单"))
             if 明确零项:
                 清尾项 = set(a名单[len(b名单):])           # 只清尾部多出来的名单项
+        if _重复键(甲, 清尾项) or _重复键(乙):
+            清单 += _整组未对应(甲, 乙, "同侧重复")        # 撞键：整张表交人工，一项都不许动
+            continue
         清单 += _配对(甲, 乙, 清尾项)
     return 清单
