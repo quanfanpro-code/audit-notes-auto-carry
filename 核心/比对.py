@@ -189,7 +189,19 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
             清单 += _整组未对应(甲, 乙, "口径冲突")
             continue
         if not 甲 or not 乙:
-            清单 += _整组未对应(甲, 乙, "仅A侧有" if 甲 else "仅B侧有")
+            if not 甲:
+                清单 += _整组未对应(甲, 乙, "仅B侧有")
+                continue
+            B该表 = B结.get(组键)
+            if (B该表 or {}).get("空名单") and _完整性好(B该表):
+                # B 明确交付“本期无行”：A 的名单项整项清空；固定项不清，保留原值
+                for r in 甲:
+                    if r.get("角色") == "项标签" or r.get("序号") is not None:
+                        清单.append(_项(r, None, "清尾", None))
+                    else:
+                        清单.append(_项(r, None, "未对应", "仅A侧有"))
+                continue
+            清单 += _整组未对应(甲, 乙, "仅A侧有")
             continue
         if _需加项(甲, 乙):
             清单 += _整组未对应(甲, 乙, "需加项")
