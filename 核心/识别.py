@@ -879,20 +879,30 @@ def _完整性(划分: list, 本侧: list, 快照) -> dict:
             漏行[f"{x.get('科目')}／{x.get('表名')}"] = 缺
             x["漏行"] = 缺
 
-        # 列上的名单一样要交齐：表范围内有内容的列，必须有列条目或例外交代。
+        # 列上的名单一样要交齐：表范围内有内容的格，必须在列清单里、或本身被例外覆盖。
         # 只查行的话，横向名单漏掉最后一列不会减少任何一个行号，就会被当成完整。
-        交代列 = {column_index_from_string(str(c.get("列") or "").strip().upper())
+        # 例外只在它真正盖住的那几格上作数：合并表头 B1:D1 不能替 D2、D3 作证。
+        列清单 = {column_index_from_string(str(c.get("列") or "").strip().upper())
                for c in x.get("列") or [] if str(c.get("列") or "").strip()}
+        例外框 = []
         for 例 in x.get("例外") or []:
             try:
-                例左, _例顶, 例右, _例底 = range_boundaries(str(例.get("范围") or ""))
+                例外框.append(range_boundaries(str(例.get("范围") or "")))
             except (ValueError, TypeError):
                 continue
-            交代列 |= set(range(例左, 例右 + 1))
-        缺列 = sorted({get_column_letter(列号) for _, 列号 in 格们} - {get_column_letter(c) for c in 交代列})
+        未交代 = {}
+        for r, 列号 in 格们:
+            if 列号 in 列清单:
+                continue
+            if any(l <= 列号 <= rr and t <= r <= b for l, t, rr, b in 例外框):
+                continue                      # 这一格本身被例外点名，算交代过
+            未交代.setdefault(列号, []).append(r)
+        缺列 = [get_column_letter(列号) for 列号 in sorted(未交代)]
         if 缺列:
             漏列[f"{x.get('科目')}／{x.get('表名')}"] = 缺列
             x["漏列"] = 缺列
+            x["漏列格"] = {名: sorted(行们) for 名, 行们 in
+                       ((get_column_letter(列号), 行们) for 列号, 行们 in 未交代.items())}
 
     逐行 = (bool(本侧) and all(x.get("完成") for x in 本侧)
           and not 漏行 and not 漏列)
