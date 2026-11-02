@@ -125,11 +125,14 @@ def _整组未对应(甲: list, 乙: list, 原因: str) -> list:
     return 清单
 
 
-def _重复键(记录们: list, 清尾项: set = frozenset()) -> bool:
-    """同一侧是否出现两组以上的完整配对键——撞键就整表停，不按顺序硬配。"""
+def _重复键(记录们: list) -> bool:
+    """同一侧是否出现两组以上的完整配对键——撞键就整表停，不按顺序硬配。
+
+    清尾项也要查：尾项撞键同样是这张表没法判，不能因为“反正要清掉”就放过。
+    """
     见 = set()
     for r in 记录们:
-        if r.get("角色") == "项标签" or r.get("不搬") or _项键(r) in 清尾项:
+        if r.get("角色") == "项标签" or r.get("不搬"):
             continue
         if not r.get("槽位") or _期间未知(r):
             continue                            # 缺编号、期间未知另有专门处理，不算这里
@@ -137,6 +140,18 @@ def _重复键(记录们: list, 清尾项: set = frozenset()) -> bool:
         if 键 in 见:
             return True
         见.add(键)
+    return False
+
+
+def _项有失败(记录们: list) -> bool:
+    """这一项里有格已经交人工（不搬、缺编号、期间未知）：整项保留，不能拿来清尾。"""
+    for r in 记录们:
+        if r.get("不搬"):
+            return True
+        if r.get("角色") == "项标签":
+            continue                            # 项标签本来就没有编号
+        if not r.get("槽位") or _期间未知(r):
+            return True
     return False
 
 
@@ -148,7 +163,10 @@ def _配对(甲: list, 乙: list, 清尾项: set) -> list:
             清单.append(_项(r, None, "清尾", None))   # 整项清空：标签和数字一起
             continue
         if r.get("角色") == "项标签":
-            清单.append(_项(r, None, "不参与", "项标签"))
+            if r.get("不搬") and r.get("序号") is not None:
+                清单.append(_项(r, None, "未对应", "识别不搬，交人工"))   # 名字不可靠，数也不搬
+            else:
+                清单.append(_项(r, None, "不参与", "项标签"))
             continue
         if r.get("不搬"):
             清单.append(_项(r, None, "未对应", "识别不搬，交人工"))
@@ -162,6 +180,8 @@ def _配对(甲: list, 乙: list, 清尾项: set) -> list:
         a桶.setdefault(_键(r), []).append(r)
     for r in 乙:
         if r.get("角色") == "项标签":
+            if r.get("不搬") and r.get("序号") is not None:
+                清单.append(_项(None, r, "未对应", "识别不搬，交人工"))
             continue                           # B 侧项标签由 A 侧那条带出清单，不重复记
         if r.get("不搬"):
             清单.append(_项(None, r, "未对应", "识别不搬，交人工"))
@@ -233,6 +253,9 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
         a项, b项 = _按项(甲), _按项(乙)
         a名单 = [k for k in _有序项(a项) if _是名单项(a项[k])]
         b名单 = [k for k in _有序项(b项) if _是名单项(b项[k])]
+        if _重复键(甲) or _重复键(乙):
+            清单 += _整组未对应(甲, 乙, "同侧重复")        # 撞键：整张表交人工，一项都不许动
+            continue
         if len(b名单) > len(a名单):
             清单 += _整组未对应(甲, 乙, "需加项")     # 只比名单项数：固定项、合计不占名额
             continue
@@ -240,9 +263,7 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
         if len(b名单) < len(a名单) and _完整性好(B该表):
             明确零项 = bool(b名单) or bool(B该表.get("空名单"))
             if 明确零项:
-                清尾项 = set(a名单[len(b名单):])           # 只清尾部多出来的名单项
-        if _重复键(甲, 清尾项) or _重复键(乙):
-            清单 += _整组未对应(甲, 乙, "同侧重复")        # 撞键：整张表交人工，一项都不许动
-            continue
+                # 只清“干净”的尾项：项里有格已经交人工，就不是“B 无此项”，得整项保留
+                清尾项 = {k for k in a名单[len(b名单):] if not _项有失败(a项[k])}
         清单 += _配对(甲, 乙, 清尾项)
     return 清单

@@ -67,7 +67,7 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
         if 甲 is None:
             continue
         态 = 项态.setdefault(_项键(甲), {"失败": None, "清尾": 0})
-        if 甲.get("角色") == "项标签":
+        if 甲.get("角色") == "项标签" and not (甲.get("不搬") and 甲.get("序号") is not None):
             continue                                  # 项标签跟随所在项，见下
         if 条.get("状态") == "清尾":
             态["清尾"] += 1
@@ -95,6 +95,8 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
         乙 = b标签.get(b项) if b项 else None
         if 乙 is None:
             态["失败"] = "项标签取不到"
+        elif 乙.get("不搬"):
+            态["失败"] = "识别不搬，交人工"               # B 的列标题标了不搬，名字不可靠
         elif 乙.get("原值状态") in _读不出:
             态["失败"] = "项标签" + str(乙.get("原值状态"))
         else:

@@ -737,7 +737,7 @@ def 铺格子(结构记录: dict, 问题: list = None) -> list:
         if 行名列 and 项方式 == "行" and not 是汇总:
             字母 = str(行名列.get("列") or "").upper()
             序 = 列序(字母)
-            if 序 and (序, 行号) not in 跳过 and (序, 行号) not in 不搬:
+            if 序 and (序, 行号) not in 跳过:
                 记.append({
                     "格": f"{工作表}!{字母}{行号}",
                     "科目": 结构记录.get("科目") or "",
@@ -747,6 +747,8 @@ def 铺格子(结构记录: dict, 问题: list = None) -> list:
                     "序号": 行.get("序号"),
                     "项方式": "行", "项位置": 行号,
                     "角色": "项标签",
+                    # 名字标了不搬，这一项就不许只换数——失败状态要跟着项走
+                    "不搬": (序, 行号) in 不搬,
                     "行路径": 行路径,
                     "列路径": [x for x in str(行名列.get("路径") or "").split("/") if x],
                     "维度值": _维度值(作用, {"期间角色": None}, 行),
@@ -793,6 +795,7 @@ def 铺格子(结构记录: dict, 问题: list = None) -> list:
             "序号": 列.get("序号"),
             "项方式": "列", "项位置": 字母,
             "角色": "项标签",
+            "不搬": (序, 标签行) in 不搬,        # 列标题标了不搬，同样整项不动
             "行路径": [],
             "列路径": [x for x in str(列.get("路径") or "").split("/") if x],
             "维度值": _维度值(作用, 列, {"名字": ""}),
@@ -859,7 +862,7 @@ def _完整性(划分: list, 本侧: list, 快照) -> dict:
     # 按“整行任一格有值”判：名字还在、最后那个金额格空着，这一行照样存在，不能当成没有。
     有值格 = {s["name"]: [(c["row"], c["column"]) for c in (s.get("cells") or {}).values()
                        if c.get("value") not in (None, "")] for s in 快照["sheets"]}
-    漏行 = {}
+    漏行, 漏列 = {}, {}
     for x in 本侧:
         范围 = str(x.get("范围") or "")
         if not 范围:
@@ -868,15 +871,31 @@ def _完整性(划分: list, 本侧: list, 快照) -> dict:
             左, 顶, 右, 底 = range_boundaries(范围)
         except (ValueError, TypeError):
             continue
-        实际 = {r for r, 列号 in 有值格.get(x.get("工作表"), [])
-              if 顶 <= r <= 底 and 左 <= 列号 <= 右}
+        格们 = [(r, 列号) for r, 列号 in 有值格.get(x.get("工作表"), [])
+              if 顶 <= r <= 底 and 左 <= 列号 <= 右]
         交代 = {r.get("行") for r in x.get("行") or []}
-        缺 = sorted(实际 - 交代)
+        缺 = sorted({r for r, _ in 格们} - 交代)
         if 缺:
             漏行[f"{x.get('科目')}／{x.get('表名')}"] = 缺
             x["漏行"] = 缺
 
-    逐行 = bool(本侧) and all(x.get("完成") for x in 本侧) and not 漏行
+        # 列上的名单一样要交齐：表范围内有内容的列，必须有列条目或例外交代。
+        # 只查行的话，横向名单漏掉最后一列不会减少任何一个行号，就会被当成完整。
+        交代列 = {column_index_from_string(str(c.get("列") or "").strip().upper())
+               for c in x.get("列") or [] if str(c.get("列") or "").strip()}
+        for 例 in x.get("例外") or []:
+            try:
+                例左, _例顶, 例右, _例底 = range_boundaries(str(例.get("范围") or ""))
+            except (ValueError, TypeError):
+                continue
+            交代列 |= set(range(例左, 例右 + 1))
+        缺列 = sorted({get_column_letter(列号) for _, 列号 in 格们} - {get_column_letter(c) for c in 交代列})
+        if 缺列:
+            漏列[f"{x.get('科目')}／{x.get('表名')}"] = 缺列
+            x["漏列"] = 缺列
+
+    逐行 = (bool(本侧) and all(x.get("完成") for x in 本侧)
+          and not 漏行 and not 漏列)
     空名单 = True
     for x in 本侧:
         有数据 = any(r.get("角色") in _数据行角色 for r in x.get("行") or [])
@@ -884,7 +903,7 @@ def _完整性(划分: list, 本侧: list, 快照) -> dict:
             空名单 = False
     return {"第一遍覆盖": bool(第一), "第二遍归段": bool(归段),
             "第三遍逐行": bool(逐行), "空名单已声明": bool(空名单),
-            "漏行": 漏行}
+            "漏行": 漏行, "漏列": 漏列}
 
 
 
@@ -988,6 +1007,12 @@ def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文�
             格["期间必填"] = 期间必填(索引, 格["槽位"])
             格们.append(格)
     格们 = 补原值(格们, 快照)
+    for 记录 in 本侧:
+        for 键, 说法 in (("漏行", "行"), ("漏列", "列")):
+            if 记录.get(键):
+                识别问题.append({"原因": f"第三遍漏交这些{说法}，该表不清尾，交人工",
+                               "科目": 记录.get("科目"), "表名": 记录.get("表名"),
+                               说法: 记录[键]})
     # 铺格子会判“例外执行不了”“列标签缺失”，这些标记要落盘，配对时才拦得住
     _写jsonl(结构路径, [r for r in _读jsonl(结构路径) if r.get("侧") != 侧名] + 本侧)
     合集路径 = 运行目录 / f"{侧名}合集.jsonl"
