@@ -186,7 +186,8 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
 
     变更, 问题 = 生成更新表({}, 清单, b记录, a记录)
     超额问题 = [{"原因": x.get("原因"), "表组": x.get("表组"), "槽位": x.get("槽位")}
-            for x in 清单 if str(x.get("原因") or "").startswith("B多出项")]
+            for x in 清单 if str(x.get("原因") or "").startswith("B多出项")
+            or str(x.get("原因") or "").startswith("B空项")]
     问题 = (_读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl")
           + 问题 + 粗比问题 + 超额问题)
     a按格 = {r.get("格"): r for r in a记录}
