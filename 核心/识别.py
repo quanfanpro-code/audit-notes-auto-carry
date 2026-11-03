@@ -195,6 +195,21 @@ def _读jsonl(路径) -> list:
     return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
 
 
+
+def _带重试写入(路径: Path, 文本: str) -> None:
+    """同步盘／杀软会短暂占用刚写的文件，重试几次再抛。"""
+    import time as _time
+    for 次 in range(20):
+        try:
+            with Path(路径).open("w", encoding="utf-8") as f:
+                f.write(文本)
+            return
+        except PermissionError:
+            if 次 == 19:
+                raise
+            _time.sleep(0.1)
+
+
 def _写jsonl(路径, 记录们) -> None:
     p = Path(路径)
     p.parent.mkdir(parents=True, exist_ok=True)

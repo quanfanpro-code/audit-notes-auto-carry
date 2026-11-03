@@ -52,6 +52,21 @@ def _读jsonl(路径):
     return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()] if p.is_file() else []
 
 
+
+def _带重试写入(路径: Path, 文本: str) -> None:
+    """同步盘／杀软会短暂占用刚写的文件，重试几次再抛。"""
+    import time as _time
+    for 次 in range(20):
+        try:
+            with Path(路径).open("w", encoding="utf-8") as f:
+                f.write(文本)
+            return
+        except PermissionError:
+            if 次 == 19:
+                raise
+            _time.sleep(0.1)
+
+
 def _写jsonl(路径, 记录):
     with Path(路径).open("w", encoding="utf-8") as f:
         for r in 记录:
@@ -170,7 +185,10 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     写索引(运行目录, 索引)
 
     变更, 问题 = 生成更新表({}, 清单, b记录, a记录)
-    问题 = _读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl") + 问题 + 粗比问题
+    超额问题 = [{"原因": x.get("原因"), "表组": x.get("表组"), "槽位": x.get("槽位")}
+            for x in 清单 if str(x.get("原因") or "").startswith("B多出项")]
+    问题 = (_读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl")
+          + 问题 + 粗比问题 + 超额问题)
     a按格 = {r.get("格"): r for r in a记录}
     标题更新 = 读标题更新(A结构)          # 改哪段、改成什么由识别给，没给就不动标题
     _写jsonl(运行目录 / "问题清单.jsonl", 问题)
