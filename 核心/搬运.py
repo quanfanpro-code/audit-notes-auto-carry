@@ -11,6 +11,12 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 _读不出 = ("读取失败", "公式无保存结果")
+_错误值 = {"#DIV/0!", "#N/A", "#NAME?", "#NULL!", "#NUM!", "#REF!", "#VALUE!", "#SPILL!", "#CALC!", "#GETTING_DATA"}
+
+
+def _是错误值(值) -> bool:
+    """Excel 公式错误是以文本形式读出来的，不能当数字写进 Word。"""
+    return isinstance(值, str) and 值.strip().upper() in _错误值
 
 
 def _项键(记录) -> tuple:
@@ -29,8 +35,9 @@ def _逐格(对应清单: list, b按格: dict) -> tuple:
             问题.append({"a格": 条.get("a格"), "b格": 条.get("b格"), "原因": "读取失败"})
             continue
         状态 = 乙.get("原值状态")
-        if 状态 in _读不出:
-            问题.append({"a格": 条.get("a格"), "b格": 条.get("b格"), "原因": 状态})
+        if 状态 in _读不出 or _是错误值(乙.get("原值")):
+            问题.append({"a格": 条.get("a格"), "b格": 条.get("b格"),
+                       "原因": "公式错误" if _是错误值(乙.get("原值")) else 状态})
             continue
         变更[条["a格"]] = "" if 状态 == "真实空白" else 乙.get("原值")
     return 变更, 问题
@@ -79,8 +86,8 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
         if 乙 is None:
             态["失败"] = 态.get("失败") or "读取失败"
             continue
-        if 乙.get("原值状态") in _读不出:
-            态["失败"] = 态.get("失败") or str(乙.get("原值状态"))
+        if 乙.get("原值状态") in _读不出 or _是错误值(乙.get("原值")):
+            态["失败"] = 态.get("失败") or ("公式错误" if _是错误值(乙.get("原值")) else str(乙.get("原值状态")))
 
     # 名单项：名字和数字必须一起换；B 侧标签取不到或读不出，整项不动
     标签来源 = {}

@@ -211,22 +211,15 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     撤回 = set()
     while True:
         try:
-            import time as _时间
-            开始时刻 = _时间.time()
-            写回Word(产物["带连接Word"], 更新表路径, Word路径,
-                  operations=[], caption_updates=标题更新)
+            回写 = 写回Word(产物["带连接Word"], 更新表路径, Word路径,
+                       operations=[], caption_updates=标题更新)
+            if 回写.get("backup_warning"):
+                # 备份没做成不影响正文有效性：写回结果以桥接的逐格校验为准，这条只作记录。
+                问题.append({"原因": "旧结果未能备份到 BackUp，正文已写入并校验；本条仅作记录",
+                            "错误": str(回写["backup_warning"])[:300], "输出": str(Word路径)})
+                _写jsonl(运行目录 / "问题清单.jsonl", 问题)
             break
         except Exception as e:
-            # 桥接程序写完结果后会把旧结果备份到 BackUp；这一步若被系统拒绝（Access denied），
-            # 只要输出文件确实是本次刷新的，结果就是有效的，不该因此让整轮交付作废。
-            错误文本 = str(e)
-            if ("BackUp" in 错误文本 or "备份" in 错误文本) and Word路径.exists() \
-                    and Word路径.stat().st_size > 100_000:
-                问题.append({"原因": "桥接程序把旧结果备份到 BackUp 时被系统拒绝（输出文件已在位）；"
-                                "回读验证照常进行，本条仅作记录",
-                            "错误": 错误文本[:300], "输出": str(Word路径)})
-                _写jsonl(运行目录 / "问题清单.jsonl", 问题)
-                break
             区域 = _错误里的区域(str(e), 区域到组)
             if not 区域 or 区域 in 撤回:
                 raise
