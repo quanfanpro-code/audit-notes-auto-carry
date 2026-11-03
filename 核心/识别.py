@@ -850,6 +850,11 @@ def _完整性(划分: list, 本侧: list, 快照) -> dict:
                        if c.get("value") not in (None, "")] for s in 快照["sheets"]}
     漏行, 漏列 = {}, {}
     for x in 本侧:
+        x.pop("漏行", None)                  # 每轮重算：旧值必须清掉，只增不清会一直背着假漏行
+        x.pop("漏列", None)
+        x.pop("漏列格", None)
+        if not x.get("完成"):
+            continue                         # 还没答复的表不参与，它不是“漏交”
         范围 = str(x.get("范围") or "")
         if not 范围:
             continue
