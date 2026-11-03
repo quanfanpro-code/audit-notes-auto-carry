@@ -124,8 +124,16 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
 
     for 侧, 表文件, 表上下文, 只跑表 in (("A", 产物["表A"], 上下文.get("tables", []), None),
                                   ("B", 输入["b表"], None, _指定工作表(输入))):
+        允许科目 = None
+        if 侧 == "B":
+            结构路径 = 运行目录 / "结构清单.jsonl"
+            if 结构路径.exists():
+                甲侧 = [x for x in _读jsonl(结构路径)
+                        if x.get("侧") == "A" and x.get("完成")]
+                if 甲侧:
+                    允许科目 = {x["科目"] for x in 甲侧}   # 粗比：B 只精读 A 也有的科目
         结果 = 识别一侧(配置, 表文件, 侧, 运行目录, 金标准, 表上下文,
-                   取消=取消, 只跑表=只跑表)
+                   取消=取消, 只跑表=只跑表, 允许科目=允许科目)
         if 结果["待答复"]:
             索引 = 读索引(运行目录) or 索引
             索引["步骤"] = "identify_a" if 侧 == "A" else "identify_b"
@@ -139,13 +147,30 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     结构 = _读jsonl(运行目录 / "结构清单.jsonl")
     A结构 = [x for x in 结构 if x.get("侧") == "A"]
     B结构 = [x for x in 结构 if x.get("侧") == "B"]
+
+    # 粗比单子：科目层级先对大方向；A 独有的科目列出来交人工，不许静默漏
+    科A = {x["科目"] for x in A结构}
+    科B = {x["科目"] for x in B结构}
+    名B = {(x.get("科目"), x.get("表名")) for x in B结构}
+    跳过 = [x for x in B结构 if x.get("跳过")]
+    粗比 = {"A独有科目": sorted(科A - 科B), "B独有科目": sorted(科B - 科A),
+            "B跳过表数": len(跳过), "B精读表数": sum(1 for x in B结构 if not x.get("跳过")),
+            "A有B无的表": [f"{x.get('科目')}／{x.get('表名')}（{x.get('区域')}）"
+                        for x in A结构 if (x.get("科目"), x.get("表名")) not in 名B]}
+    (运行目录 / "粗比_B.json").write_text(json.dumps(粗比, ensure_ascii=False, indent=2),
+                                       encoding="utf-8")
+    粗比问题 = []
+    if 粗比["A有B无的表"]:
+        粗比问题.append({"原因": "粗比：A 有这张表，B 找不到对应（可能并进了别的表，也可能 B 没有这一节），交人工",
+                         "表": 粗比["A有B无的表"]})
+
     清单 = 建立对应(a记录, b记录, A结构, B结构)
     _写jsonl(运行目录 / "对应清单.jsonl", 清单)
     索引["步骤"] = "carry"
     写索引(运行目录, 索引)
 
     变更, 问题 = 生成更新表({}, 清单, b记录, a记录)
-    问题 = _读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl") + 问题
+    问题 = _读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl") + 问题 + 粗比问题
     a按格 = {r.get("格"): r for r in a记录}
     标题更新 = 读标题更新(A结构)          # 改哪段、改成什么由识别给，没给就不动标题
     _写jsonl(运行目录 / "问题清单.jsonl", 问题)
@@ -195,6 +220,10 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
 
     差异 = 回读验证(Word路径, 变更, 运行目录 / "回读临时")
     _写jsonl(运行目录 / "回读记录.jsonl", 差异)      # 差异文件保留，不删证据
+    if 差异:
+        问题 += [{"原因": "回读不一致：写进 Word 后回读对不上，明细见 回读记录.jsonl",
+                  "差异": d} for d in 差异]
+        _写jsonl(运行目录 / "问题清单.jsonl", 问题)   # 流程末尾把所有问题收齐在一份清单里
     索引["产物哈希"] = {"更新后附注表格": _哈希(更新表路径), "Word新副本": _哈希(Word路径)}
     索引["回读差异"] = len(差异)
     索引["撤回表"] = sorted(撤回)

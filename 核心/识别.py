@@ -828,6 +828,7 @@ def _完整性(划分: list, 本侧: list, 快照) -> dict:
     每张表原范围内实际有值的行都在行清单里有交代（漏一行就不完整）；没有数据行的表必须显式声明空名单。
     任一条不成立，清尾就不许做——「校验通过」只证明交上来的部分自洽，证明不了没漏。
     """
+    本侧 = [x for x in 本侧 if not x.get("跳过")]   # 粗比跳过的表不在验收范围：它们本来就没做
     有值行 = {c["row"] for s in 快照["sheets"] for c in (s.get("cells") or {}).values()}
     段 = [x["行范围"] for x in 划分 if x.get("行范围")]
     if 段 and 有值行:
@@ -913,7 +914,7 @@ def _完整性(划分: list, 本侧: list, 快照) -> dict:
 
 
 def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文件, 上下文=None,
-         只用已有答复=False, 取消=None, 只跑表=None) -> dict:
+         只用已有答复=False, 取消=None, 只跑表=None, 允许科目=None) -> dict:
     运行目录 = Path(运行目录)
     运行目录.mkdir(parents=True, exist_ok=True)
     快照 = 读快照(表文件路径, 上下文)
@@ -965,10 +966,23 @@ def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文�
         _写jsonl(结构路径, [r for r in 全部 if r.get("侧") != 侧名] + 本侧)
     统计["表数"] = len(本侧)
 
+    # 粗比门槛：科目不在 A 侧出现过的表不做第三遍（B 独有科目，识别了也配不上）。
+    # 只跳过精读，表组、行范围原样保留在结构清单里，可追溯、可人工复核。
+    if 允许科目 is not None:
+        改 = False
+        for 记录 in 本侧:
+            if not 记录.get("跳过") and 记录.get("科目") not in 允许科目:
+                记录["跳过"] = "粗比：科目不在A"
+                改 = True
+        if 改:
+            _写jsonl(结构路径, [r for r in _读jsonl(结构路径) if r.get("侧") != 侧名] + 本侧)
+
     # 第三遍：逐表精读（按表走，一张表一次，顺序执行）
     待答复 = []
     for 序号, 记录 in enumerate(本侧, 1):
         if 记录.get("完成"):
+            continue
+        if 记录.get("跳过"):
             continue
         if 取消 is not None and 取消.is_set():
             待答复.append("已取消")
