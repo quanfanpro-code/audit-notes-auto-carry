@@ -17,7 +17,6 @@ from openpyxl.workbook.defined_name import DefinedName
 from 核心.搬运 import 生成更新表
 from 核心.比对 import 建立对应
 from 核心.接续 import 读索引
-from 核心.结构维护 import 生成结构操作
 from 核心.识别 import 识别一侧, 铺格子, _完整性, _解析精读
 
 
@@ -292,17 +291,3 @@ def _建表(path, 行们, 区域):
         wb.defined_names[名] = DefinedName(名, attr_text=范围)
     wb.save(path)
     return path
-
-
-def test_第4项_插空行同时改金额仍要认出增行(tmp_path):
-    三行 = [(1, "合计", 10), (2, "甲公司", 20), (3, "乙公司", 30)]
-    基 = _建表(tmp_path / "基准.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
-    改 = _建表(tmp_path / "改后.xlsx", 三行, {"TA_001": "s1!$A$1:$B$3"})
-    wb = load_workbook(改); ws = wb["s1"]
-    ws.insert_rows(4)                                   # 表尾补一行空行
-    ws["B2"] = 25                                       # 顺手把甲公司金额改掉
-    wb.defined_names["TA_001"] = DefinedName("TA_001", attr_text="s1!$A$1:$B$4")
-    wb.save(改)
-    assert 生成结构操作(基, 改) == [{"range_name": "TA_001", "axis": "row",
-                                 "action": "insert", "index": 3, "count": 1,
-                                 "template_index": 2}]

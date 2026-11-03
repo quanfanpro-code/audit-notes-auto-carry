@@ -11,7 +11,6 @@ import pytest
 from openpyxl import Workbook, load_workbook
 
 from 核心.桥接 import 提取, 更新
-from 核心.结构维护 import 生成结构操作
 
 样本 = Path(__file__).resolve().parent / "样本" / "01_普通表格.docx"
 pytestmark = pytest.mark.集成
@@ -65,56 +64,6 @@ def test_普通值回写并回读核对(tmp_path):
 
 
 
-def test_增行操作(tmp_path):
-    from openpyxl.workbook.defined_name import DefinedName
-    d = 提取到(tmp_path)
-    表A = load_workbook(d / "表A.xlsx")
-    表A["sheet1"].insert_rows(3)
-    表A["sheet1"]["B3"] = "新增"; 表A["sheet1"]["C3"] = "行值"
-    # 模拟用户在 Excel 中插入行后命名区域随之扩展（openpyxl 不会自动扩）
-    表A.defined_names["TA_001"] = DefinedName("TA_001", attr_text="sheet1!$B$2:$D$4")
-    表A.save(d / "改后.xlsx")
-    ops = 生成结构操作(d / "表A.xlsx", d / "改后.xlsx")
-    assert ops == [{"range_name": "TA_001", "axis": "row", "action": "insert",
-                    "index": 1, "count": 1, "template_index": 0}]
-    更新(str(d / "带连接.docx"), str(d / "改后.xlsx"), str(d / "新副本.docx"), operations=ops)
-    结果表 = 回读(d, "新副本.docx")
-    assert 结果表["sheet1"]["B3"].value == "新增"       # 新行内容写入正确位置
-
-
-
-
-def test_删行操作(tmp_path):
-    from openpyxl.workbook.defined_name import DefinedName
-    d = 提取到(tmp_path)
-    表A = load_workbook(d / "表A.xlsx")
-    原行数 = 表A["sheet1"].max_row
-    表A["sheet1"].delete_rows(3)
-    # 模拟用户在 Excel 中删行后命名区域随之收缩
-    表A.defined_names["TA_001"] = DefinedName("TA_001", attr_text="sheet1!$B$2:$D$2")
-    表A.save(d / "改后.xlsx")
-    ops = 生成结构操作(d / "表A.xlsx", d / "改后.xlsx")
-    assert ops == [{"range_name": "TA_001", "axis": "row", "action": "delete",
-                    "index": 1, "count": 1}]
-    更新(str(d / "带连接.docx"), str(d / "改后.xlsx"), str(d / "新副本.docx"), operations=ops)
-    结果表 = 回读(d, "新副本.docx")
-    assert 结果表["sheet1"].max_row < 原行数          # 行确实少了
-
-    改后 = load_workbook(d / "改后.xlsx")["sheet1"]
-    期望 = {坐标: 改后[坐标].value for 坐标 in ("A2", "B2", "C2", "A3", "B3")}
-    实际 = 结果表["sheet1"]
-    for 坐标, 值 in 期望.items():
-        assert 实际[坐标].value == 值, f"{坐标} 回读不一致：期望 {值!r}，实际 {实际[坐标].value!r}"
-
-    改后 = load_workbook(d / "改后.xlsx")["sheet1"]
-    期望 = {坐标: 改后[坐标].value for 坐标 in ("A2", "B2", "C2", "A3", "B3")}
-    实际 = 结果表["sheet1"]
-    for 坐标, 值 in 期望.items():
-        assert 实际[坐标].value == 值, f"{坐标} 回读不一致：期望 {值!r}，实际 {实际[坐标].value!r}"
-
-
-
-
 def test_命名区域缺失报错(tmp_path):
     d = 提取到(tmp_path)
     wb = Workbook(); wb.active.title = "sheet1"; wb.active["B2"] = "x"
@@ -127,52 +76,3 @@ def test_命名区域缺失报错(tmp_path):
 
 
 # —— 2026-11-02 追加：⑩ 多区域下删中间行、⑪ 跨区域明确报错 ——
-
-
-
-
-def test_六十六区域下删中间表一行_序号相对该表(tmp_path):
-    """一张工作表装 66 个命名区域：删中间某张表的行，序号必须相对该表自己的区域。"""
-    from openpyxl.workbook.defined_name import DefinedName
-    wb = Workbook(); ws = wb.active; ws.title = "sheet1"
-    顶们 = {}
-    for i in range(1, 67):
-        顶 = 2 + (i - 1) * 5
-        顶们[f"TA_{i:03d}"] = 顶
-        ws[f"B{顶}"] = "项目"; ws[f"C{顶}"] = "期末余额"; ws[f"D{顶}"] = "期初余额"
-        ws[f"B{顶 + 1}"] = f"明细{i}"; ws[f"C{顶 + 1}"] = i; ws[f"D{顶 + 1}"] = i * 2
-        ws[f"B{顶 + 2}"] = "合计"; ws[f"C{顶 + 2}"] = i; ws[f"D{顶 + 2}"] = i * 2
-        wb.defined_names[f"TA_{i:03d}"] = DefinedName(
-            f"TA_{i:03d}", attr_text=f"sheet1!$B${顶}:$D${顶 + 2}")
-    基 = tmp_path / "基准.xlsx"
-    改 = tmp_path / "改后.xlsx"
-    wb.save(基)
-    shutil.copy2(基, 改)
-    wb2 = load_workbook(改)
-    wb2["sheet1"].delete_rows(顶们["TA_030"] + 1)     # 删该表中间那行
-    wb2.save(改)
-    ops = 生成结构操作(基, 改)
-    assert ops == [{"range_name": "TA_030", "axis": "row", "action": "delete",
-                    "index": 1, "count": 1}]          # 相对区首行得 1，相对工作表会得 152
-
-
-
-
-def test_跨两个命名区域的改动明确报错(tmp_path):
-    from openpyxl.workbook.defined_name import DefinedName
-    def 建(路径):
-        wb = Workbook(); ws = wb.active; ws.title = "s1"
-        for 行, 文 in ((1, "甲"), (2, "乙"), (3, "丙"), (4, "丁")):
-            ws[f"A{行}"] = 文
-        wb.defined_names["TA_001"] = DefinedName("TA_001", attr_text="s1!$A$1:$A$2")
-        wb.defined_names["TA_002"] = DefinedName("TA_002", attr_text="s1!$A$3:$A$4")
-        wb.save(路径); return 路径
-
-    基 = 建(tmp_path / "基准.xlsx")
-    改 = 建(tmp_path / "改后.xlsx")
-    wb = load_workbook(改)
-    wb["s1"].delete_rows(2, 2)             # 连删第 2、3 行 → 横跨 TA_001 与 TA_002
-    wb.save(改)
-    with pytest.raises(RuntimeError) as e:
-        生成结构操作(基, 改)
-    assert "区域" in str(e.value)

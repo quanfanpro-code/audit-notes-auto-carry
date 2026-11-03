@@ -12,12 +12,12 @@ from datetime import datetime
 from pathlib import Path
 
 from .比对 import 建立对应
-from .写回 import 构造标题更新, 写回Word
+from .写回 import 读标题更新, 写回Word
 from .回读 import 回读验证
 from .提取 import 提取任务
 from .接续 import 读索引, 写索引
 from .搬运 import 生成更新表, 保存更新表
-from .结构维护 import 生成结构操作
+from .结构维护 import 读结构操作
 from .识别 import 识别一侧
 
 
@@ -147,14 +147,7 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     变更, 问题 = 生成更新表({}, 清单, b记录, a记录)
     问题 = _读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl") + 问题
     a按格 = {r.get("格"): r for r in a记录}
-    标题更新, 标题失败 = 构造标题更新(清单, a记录, 上下文, A结构)
-    if 标题失败:
-        # 标题改不了的表，这张表一个数都不换：不留下“旧标题 + 新数字”
-        失败表 = {(x["科目"], x["表名"]) for x in 标题失败}
-        变更 = {格: 值 for 格, 值 in 变更.items()
-                if (a按格.get(格, {}).get("科目"), a按格.get(格, {}).get("表名")) not in 失败表}
-        问题 = 问题 + [{"原因": "标题改不了，该表不换数（" + x["原因"] + "）",
-                      "科目": x["科目"], "表名": x["表名"]} for x in 标题失败]
+    标题更新 = 读标题更新(A结构)          # 改哪段、改成什么由识别给，没给就不动标题
     _写jsonl(运行目录 / "问题清单.jsonl", 问题)
 
     已录哈希 = 索引.get("产物哈希") or {}
@@ -213,14 +206,14 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
 
 
 def 人工回写(输入: dict) -> dict:
-    """人工直接回写：按真实路径重读用户已保存的 Excel；给基准表A时先推导结构操作。
+    """人工直接回写：按真实路径重读用户已保存的 Excel。
 
+    结构操作由调用方给定（输入["结构操作"]，json 文件路径或数组）；不给就只改内容，
+    不插行、不删行。程序不再比较两份文件去推断结构变化。
     输出路径前端叫「输出」、内部叫 output，两种都认，免得字段名对不上白跑一趟。
     """
     输出 = 输入.get("output") or 输入.get("输出")
     if not 输出:
         raise ValueError("缺少输出路径（输出／output）")
-    ops = []
-    if 输入.get("基准表A") and 输入.get("excel"):
-        ops = 生成结构操作(输入["基准表A"], 输入["excel"])
+    ops = 读结构操作(输入["结构操作"]) if 输入.get("结构操作") else []
     return 写回Word(输入["带连接word"], 输入["excel"], 输出, operations=ops)

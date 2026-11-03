@@ -152,37 +152,6 @@ def _装stub(monkeypatch, 上下文段="本表按账龄披露，无日期"):
 
 
 
-def test_标题定位不到就整表不换数(tmp_path, monkeypatch):
-    _装stub(monkeypatch)                       # 上下文里没有“2024年12月31日”这句
-    b路径 = tmp_path / "b.xlsx"
-    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
-    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
-                tmp_path / "任务R7a", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
-    assert 状态["步骤"] == "done"
-    值 = _读值(状态["产物"]["更新后附注表格"])
-    assert 值 == 100                            # 标题改不了，这张表一个数都不换
-    目录 = Path(状态["产物"]["更新后附注表格"]).parent
-    assert '"对应"' in (目录 / "对应清单.jsonl").read_text(encoding="utf-8")   # 确实配上了，只是标题改不了
-    问题 = (目录 / "问题清单.jsonl").read_text(encoding="utf-8")
-    assert "标题改不了" in 问题
-
-
-
-
-def test_标题定位得到就替换(tmp_path, monkeypatch):
-    _装stub(monkeypatch, "本表期末指2024年12月31日，金额单位为人民币元")
-    b路径 = tmp_path / "b.xlsx"
-    wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
-    状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
-                tmp_path / "任务R7b", {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
-    值 = _读值(状态["产物"]["更新后附注表格"])
-    assert 值 == 9                              # 标题能定位，这张表照常换数
-    更新 = json.loads((Path(状态["产物"]["更新后附注表格"]).parent / "接续索引.json")
-                    .read_text(encoding="utf-8-sig"))
-    assert 更新["步骤"] == "done"
-
 
 
 
@@ -309,4 +278,3 @@ def test_一张表写失败就恢复原值再交付(tmp_path, monkeypatch):
     assert _读值(运行目录 / "更新后附注表格.xlsx") == 100    # 该表恢复原值，不写半截
     问题 = (运行目录 / "问题清单.jsonl").read_text(encoding="utf-8")
     assert "已保持原值" in 问题
-
