@@ -10,10 +10,11 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from 核心.桥接 import 提取, 更新
+from 核心.桥接 import 提取, 更新, 桥接程序
 
 样本 = Path(__file__).resolve().parent / "样本" / "01_普通表格.docx"
-pytestmark = pytest.mark.集成
+pytestmark = [pytest.mark.集成, pytest.mark.skipif(
+    not 桥接程序.is_file(), reason="缺少WordBridge发布包，真实Word集成验证未执行")]
 
 
 def md5(p):

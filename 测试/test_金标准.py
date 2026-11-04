@@ -3,19 +3,22 @@
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from pathlib import Path
+import pytest
 from 核心.金标准 import 加载金标准, 建索引, 科目清单, 表清单, 候选槽位, 编号存在, 期间必填
 
-主文件 = Path(r"C:\Users\27651\Desktop\附注自动更新系统\金标准\精简新副本_20261101_010814\财务报表附注语义金标准_当前基准_以此为准.jsonl")
+主文件 = Path(__file__).resolve().parent.parent / "金标准" / "精简新副本_20261101_010814" / "财务报表附注语义金标准_当前基准_以此为准.jsonl"
 
 
 def test_真实主文件三层对数():
     金 = 加载金标准(主文件)
-    assert len(金) == 12817
+    assert len(金) == 12806
     索 = 建索引(金)
+    assert len(索["编号"]) == 9196
     assert len(科目清单(索)) == 103
     assert "应收账款" in 科目清单(索)
     表 = 表清单(索, "应收账款")
-    assert len(表) == 18
+    assert len(表) == 17
+    assert "明细" not in 表                  # 该表仅剩停用条目，不进入运行目录
     assert "按账龄披露" in 表
 
 
@@ -24,7 +27,7 @@ def test_真实主文件三层对数():
 def test_候选槽位只带必要字段():
     索 = 建索引(加载金标准(主文件))
     候 = 候选槽位(索, "应收账款", "按账龄披露")
-    assert len(候) == 57                       # 真实值
+    assert len(候) == 68                       # 当前有效条目，停用号不进入候选
     for c in 候[:5]:
         assert set(c) == {"id", "槽位名", "行路径", "列路径", "别名", "值类型", "维度"}
         assert c["id"].startswith("C-N054-T001")
@@ -43,9 +46,10 @@ def test_编号校验():
 
 
 def test_编号存在不限C开头():
-    """实测 P 类 1,563 条（占 12%），只认 C-N 会把它们全判成缺失。"""
+    """有效P类同样可用；曾用于旧测试的停用P号必须拒绝。"""
     索 = 建索引(加载金标准(主文件))
-    assert 编号存在(索, "P-N003-T001-S001")      # 真实 P 类编号
+    assert 编号存在(索, "P-N003-T002-S001")
+    assert not 编号存在(索, "P-N003-T001-S001")
     assert not 编号存在(索, "C-N999-T999-S999")  # 虚构
 
 
@@ -57,7 +61,8 @@ def test_期间必填按编号查():
     assert 期间必填(索, "C-N087-T001-S001") is True    # 库存现金余额，来源里期初期末都有
     assert 期间必填(索, "C-N054-T003-S002") is False   # 名称类文字槽位
     assert 期间必填(索, "C-N019-T013-S006") is False   # 款项的性质，维度只有 counterparty
-    assert 期间必填(索, "C-N999-T999-S999") is False   # 不存在的编号不要求期间
+    with pytest.raises(ValueError, match="无效槽位编号"):
+        期间必填(索, "C-N999-T999-S999")
 
 
 

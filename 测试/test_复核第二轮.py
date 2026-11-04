@@ -140,7 +140,9 @@ def test_第4项_合计不抵新增名单项():
     B = [_记("b!B2", "S1", 序号=1, 项位置=2, 原值=400),
          _记("b!B3", "S1", 序号=2, 项位置=3, 原值=500)]
     清 = 建立对应(A, B, _构(), _构())
-    assert all(x["状态"] == "未对应" and x["原因"] == "需加项" for x in 清)
+    assert any(x["a格"] == "a!B2" and x["状态"] == "对应" for x in 清)
+    assert any(x["b格"] == "b!B3" and x["原因"].startswith("B多出项") for x in 清)
+    assert any(x["a格"] == "a!B3" and x["原因"] == "仅A侧有" for x in 清)
 
 
 # —— 第 5 项：两层表头按识别给的标签行，名称与数字一起换 ——

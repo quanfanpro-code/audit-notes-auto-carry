@@ -15,7 +15,9 @@ def 调用桥接(请求: dict, 工作目录=None, exe=None, 前缀=None):
     exe = Path(exe) if exe else 桥接程序
     if not exe.is_file():
         raise FileNotFoundError(f"Word桥接程序不存在：{exe}")
-    工作目录 = Path(工作目录) if 工作目录 else exe.parent
+    工作目录 = (Path(工作目录) if 工作目录 else
+              Path(__file__).resolve().parent.parent / "运行" / "桥接留证" / uuid.uuid4().hex)
+    工作目录.mkdir(parents=True, exist_ok=True)
     请求文件 = 工作目录 / ("Word请求_" + uuid.uuid4().hex[:8] + ".json")
     请求文件.write_text(json.dumps(请求, ensure_ascii=False), encoding="utf-8-sig")
     命令 = ([str(前缀)] if 前缀 else []) + [str(exe), str(请求文件)]

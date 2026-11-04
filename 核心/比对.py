@@ -148,29 +148,24 @@ def _重复键(记录们: list) -> bool:
 
 
 def _项有数据(记录们: list) -> bool:
-    """这一项到底有没有数据：至少一格不是空、也不是 0。
-
-    项＝有数据的项。全空、全 0 的行是模板预留的格子，不是这一期披露的内容，
-    不占项位、不参与配对——这条在这里一次判定，识别那边编不编号都不影响结果。
-    """
-    for r in 记录们:
-        if r.get("角色") == "项标签":
-            continue
-        v = r.get("原值")
-        if v is None or v == "":
-            continue
-        if isinstance(v, (int, float)) and v == 0:
-            continue
+    """仅确认至少两期均为数值0时不搬；空白、失败和缺号仍保留项位。"""
+    数据 = [r for r in 记录们 if r.get("角色") != "项标签"]
+    if not 数据 or any(r.get("不搬") or not r.get("槽位") or _期间未知(r)
+                     or r.get("原值状态") != "值" for r in 数据):
         return True
-    return False
+    期间 = {str((r.get("维度值") or {}).get("期间角色") or "未知") for r in 数据}
+    if len(期间) < 2 or "未知" in 期间:
+        return True
+    return not all(isinstance(r.get("原值"), (int, float))
+                   and not isinstance(r.get("原值"), bool) and r["原值"] == 0 for r in 数据)
 
 
 def _空项(表: dict, 记录们: list) -> dict:
-    """B 里给了号、但整项全空或全 0 的一项：只记账，不占位、不搬。"""
+    """确认两期全零的项只记账，不搬，仍保留原序号。"""
     名 = next((r.get("原值") for r in 记录们 if r.get("角色") == "项标签"), None)
     return _项(None, 记录们[0] if 记录们 else None, "未对应",
                f"B空项：{名 if 名 not in (None, '') else '（无名称）'}；"
-               "整项全空或全 0，不占项位、不搬")
+               "已确认两期均为数值0，保留原序号、不搬")
 
 
 def _超额项(表: dict, 记录们: list) -> dict:
@@ -299,16 +294,14 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
         a项, b项 = _按项(甲), _按项(乙)
         a名单 = [k for k in _有序项(a项) if _是名单项(a项[k])]
         b全部 = [k for k in _有序项(b项) if _是名单项(b项[k])]
-        b名单 = [k for k in b全部 if _项有数据(b项[k])]      # 项＝有数据的项
+        b名单 = [k for k in b全部 if _项有数据(b项[k])]
         b空项 = [k for k in b全部 if k not in set(b名单)]
         if _重复键(甲) or _重复键(乙):
             清单 += _整组未对应(甲, 乙, "同侧重复")        # 撞键：整张表交人工，一项都不许动
             continue
-        超额项 = []
-        if len(b名单) > len(a名单):
-            # 情况3：B 有数据的项比 A 多。搬得下的按序先搬，多出来的逐项记账交人工，
-            # 不再整表停——不硬塞，也不静默丢。
-            超额项 = b名单[len(a名单):]
+        a末 = max((_序号(a项, k) for k in a名单), default=0)
+        # 全零项仍占原序号；与清尾采用同一位置口径，不用过滤后的数量判断容量。
+        超额项 = [k for k in b名单 if _序号(b项, k) > a末]
         踢出 = set(b空项) | set(超额项)
         if 踢出:
             乙 = [r for r in 乙 if _项键(r) not in 踢出]

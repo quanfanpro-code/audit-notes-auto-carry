@@ -141,7 +141,7 @@ def _empty_formula_cached_strings(path):
     return result
 
 
-def read_workbook(path,context=None):
+def read_workbook(path,context=None,areas=None):
     path=Path(path).resolve()
     before=file_hash(path)
     w=load_workbook(path,data_only=False,keep_vba=path.suffix.lower()==".xlsm",keep_links=True)
@@ -176,6 +176,13 @@ def read_workbook(path,context=None):
                         except ValueError:pass
             for m in s.merged_cells.ranges:
                 if s.cell(m.min_row,m.min_col).value is not None:boxes.append((m.min_col,m.min_row,m.max_col,m.max_row))
+            for area in areas or []:
+                if area.get("sheet") != s.title:continue
+                try:box=range_boundaries(str(area.get("range") or ""))
+                except (ValueError,TypeError):raise WorkbookError("识别给定的业务范围无效") from None
+                if not all(type(v) is int for v in box) or not (1<=box[0]<=box[2]<=16384 and 1<=box[1]<=box[3]<=1048576):
+                    raise WorkbookError("识别给定的业务范围无效")
+                boxes.append(box)
             max_row=max([r for r,c in anchors]+[b[3] for b in boxes+physical_boxes]+[1])
             max_col=max([c for r,c in anchors]+[b[2] for b in boxes+physical_boxes]+[1])
             hidden=[(d.min or column_index_from_string(k),d.max or column_index_from_string(k)) for k,d in s.column_dimensions.items() if d.hidden]
@@ -216,5 +223,5 @@ def read_workbook(path,context=None):
 
 
 # —— 新计划接口别名 ——
-def 读快照(xlsx路径, 上下文=None):
-    return read_workbook(xlsx路径, 上下文)
+def 读快照(xlsx路径, 上下文=None, 业务范围=None):
+    return read_workbook(xlsx路径, 上下文, 业务范围)

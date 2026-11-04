@@ -30,9 +30,7 @@ def _按显示精度一致(期望, 实际) -> bool:
         if 甲 == 乙:
             return True
         return abs(甲 - 乙) <= 0.5 * 10 ** (-_小数位(实际)) + 1e-9
-    甲文 = str("" if 期望 is None else 期望).strip()
-    乙文 = str("" if 实际 is None else 实际).strip()
-    return 甲文 == 乙文
+    return False
 
 
 def 回读验证(word输出, 变更清单: dict, 临时目录) -> list:

@@ -383,7 +383,22 @@ def _标签行值(原值, 说明: str, 行范围):
     return 值
 
 
-def _解析精读(答复: str, 编号集: set, 行范围=None, 列范围=None, 续表序: int = 1) -> dict:
+def _校验格期间(列们, 行们, 期间必填编号):
+    for 行 in 行们:
+        if 行.get("角色") not in _数据行角色:
+            continue
+        for 列 in 列们:
+            字母 = 列.get("列")
+            if 列.get("角色") != "数据列" or (行.get("槽位") or {}).get(字母) not in 期间必填编号:
+                continue
+            期间 = ((行.get("期间角色按列") or {}).get(字母)
+                  or 行.get("期间角色") or 列.get("期间角色"))
+            if 期间 not in _期间角色集:
+                raise RuntimeError(f"第 {行.get('行')} 行 {字母} 列期间角色缺失或不合规")
+
+
+def _解析精读(答复: str, 编号集: set, 行范围=None, 列范围=None, 续表序: int = 1,
+         期间必填编号=None) -> dict:
     """解析第三遍答复并做本表范围内的校验；任一不过就抛错，不标完成。
 
     行范围/列范围给定时，坐标越界直接判失败，不许跑到表外；不给则只做格式校验。
@@ -451,8 +466,12 @@ def _解析精读(答复: str, 编号集: set, 行范围=None, 列范围=None, �
         if not r["槽位"] and not r["不搬原因"]:
             raise RuntimeError(f"第三遍第 {r['行']} 行没有交代：既没给槽位映射，也没写不搬原因")
     空名单 = 对象.get("空名单") or []
+    if not isinstance(空名单, list) or any(
+            not isinstance(项, dict) or 项.get("槽位") not in 编号集 for 项 in 空名单):
+        raise RuntimeError("第三遍空名单声明的槽位编号无效")
     if not 数据行 and not 空名单:
         raise RuntimeError("第三遍只交了表头，也没在「空名单」里声明本期无行")
+    _校验格期间(列出, 行出, 期间必填编号 or set())
     _校验序号(数据行, 列出, 续表序=int(续表序 or 1))
     return {"列": 列出, "行": 行出,
             "作用范围": 对象.get("作用范围") or {},
@@ -966,6 +985,26 @@ def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文�
     结构路径 = 运行目录 / "结构清单.jsonl"
     全部 = _读jsonl(结构路径)
     本侧 = [r for r in 全部 if r.get("侧") == 侧名]
+    # 完成状态不代表编号仍有效；拒绝旧缓存，保留原结构和答复供重新识别。
+    for 记录 in 本侧:
+        if not 记录.get("完成"):
+            continue
+        旧号 = {编号 for 行 in 记录.get("行") or []
+              for 编号 in (行.get("槽位") or {}).values() if 编号}
+        声明 = 记录.get("空名单") or []
+        if not isinstance(声明, list) or any(
+                not isinstance(项, dict) or 项.get("槽位") not in 索引["编号"] for 项 in 声明):
+            raise RuntimeError("旧任务含失效空名单编号；请新建任务重新识别，原答复保留")
+        旧号.update(项["槽位"] for 项 in 声明)
+        失效 = sorted(旧号 - 索引["编号"])
+        if 失效:
+            raise RuntimeError("旧任务含失效槽位编号：" + "、".join(失效)
+                               + "；请新建任务重新识别，原任务与答复保留")
+        try:
+            _校验格期间(记录.get("列") or [], 记录.get("行") or [],
+                      {编号 for 编号 in 旧号 if 期间必填(索引, 编号)})
+        except RuntimeError as e:
+            raise RuntimeError(f"旧任务期间结论不完整：{e}；请新建任务重新识别，原答复保留") from e
     if not 本侧:
         表名册 = 待表科目(划分, 索引)
         指令, 材料 = 第二遍材料(共用文字(), 划分, 表名册)
@@ -1016,7 +1055,8 @@ def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文�
             continue
         记录.update(_解析精读(答复, {c["id"] for c in 候选 if c.get("id")},
                           行范围=记录.get("行范围"), 列范围=_列范围(记录["范围"]),
-                          续表序=记录.get("续表序") or 1))
+                          续表序=记录.get("续表序") or 1,
+                          期间必填编号={c["id"] for c in 候选 if (c.get("维度") or {}).get("period")}))
         记录["原始结构"] = {"合并": _合并们(快照, 记录["工作表"], 记录["范围"])}
         记录["完成"] = True
         _写jsonl(结构路径, [r for r in _读jsonl(结构路径) if r.get("侧") != 侧名] + 本侧)
@@ -1041,8 +1081,16 @@ def 识别一侧(配置, 表文件路径, 侧名, 运行目录, 金标准主文�
             continue
         for 格 in 铺格子(记录, 识别问题):
             格["槽位名"] = 名表.get(格["槽位"], "")
-            格["期间必填"] = 期间必填(索引, 格["槽位"])
+            格["期间必填"] = bool(格["槽位"]) and 期间必填(索引, 格["槽位"])
             格们.append(格)
+    已读格 = {f"{表['name']}!{格}" for 表 in 快照["sheets"] for 格 in 表.get("cells") or {}}
+    if any(格["格"] not in 已读格 for 格 in 格们):
+        范围们 = [{"sheet": 表["工作表"], "range": 表["范围"]}
+                 for 表 in 本侧 if 表.get("列") and 表.get("范围")]
+        补齐快照 = 读快照(表文件路径, 上下文, 业务范围=范围们)
+        if 补齐快照["sha256"] != 快照["sha256"]:
+            raise RuntimeError("原文件在识别期间发生变化，请新建任务重新识别")
+        快照 = 补齐快照
     格们 = 补原值(格们, 快照)
     for 记录 in 本侧:
         for 键, 说法 in (("漏行", "行"), ("漏列", "列")):
