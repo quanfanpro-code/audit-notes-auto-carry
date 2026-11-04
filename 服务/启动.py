@@ -40,6 +40,26 @@ def 服务日志路径() -> Path:
     return 日志路径.parent / "服务日志.txt"
 
 
+def 准备桥接() -> bool:
+    from 核心.桥接 import 检查桥接运行环境, NET下载地址
+    try:
+        检查桥接运行环境()
+        return True
+    except RuntimeError as e:
+        import ctypes
+        import webbrowser
+        原因 = str(e)
+        记启动("启动失败：" + 原因)
+        if NET下载地址 in 原因:
+            选择 = ctypes.windll.user32.MessageBoxW(None, 原因 + "\n\n是否打开微软官方下载页面？",
+                                                "需要安装 .NET 10", 0x14)
+            if 选择 == 6:
+                webbrowser.open(NET下载地址)
+        else:
+            ctypes.windll.user32.MessageBoxW(None, 原因, "Word桥接尚未准备好", 0x10)
+        return False
+
+
 def 日志配置() -> dict:
     """给 uvicorn 一份写文件的日志配置。
 

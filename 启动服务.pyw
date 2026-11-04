@@ -16,7 +16,7 @@ import uvicorn
 根 = Path(__file__).resolve().parent
 sys.path.insert(0, str(根))
 
-from 服务.启动 import 选端口, 记启动, 日志配置
+from 服务.启动 import 选端口, 记启动, 日志配置, 准备桥接
 
 
 def 说(文本: str) -> None:
@@ -30,6 +30,8 @@ def 说(文本: str) -> None:
 
 if __name__ == "__main__":
     try:
+        if not 准备桥接():
+            raise SystemExit(1)
         端口 = 选端口()
         地址 = f"http://127.0.0.1:{端口}/"
         记启动("启动 " + 地址)

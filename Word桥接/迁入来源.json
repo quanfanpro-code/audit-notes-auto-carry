@@ -1,0 +1,119 @@
+{
+  "源码仓库": "quanfanpro-code/financial-notes-updater",
+  "固定提交": "c549e5bd92c6d96ad521144724a628228712e4fd",
+  "链接": "https://github.com/quanfanpro-code/financial-notes-updater/tree/c549e5bd92c6d96ad521144724a628228712e4fd/Word%E6%A1%A5%E6%8E%A5",
+  "许可证": "AGPL-3.0，见仓库根目录LICENSE；复用核心保留其原来源.json",
+  "说明": "22个文件逐字节迁入，没有引入旧版业务或旧版路径依赖。",
+  "文件": [
+    {
+      "文件": "Word桥接/Word桥接.csproj",
+      "sha256": "50fbf69386db4dcd7d1979fbba10afd854495b3113469bdc65dbfe036f7b51e5",
+      "git_blob": "3db180d0db00d0b3f0f8d5b4e0cee9e4a28bf810"
+    },
+    {
+      "文件": "Word桥接/兼容/提取表格.cs",
+      "sha256": "c90326af325951b23209d86ec80583d960b399cb8dcb62a416df8e119e8a82fe",
+      "git_blob": "16662b7b58b8f78b1063850c75e848b38ab1fd66"
+    },
+    {
+      "文件": "Word桥接/兼容/章节范围.cs",
+      "sha256": "8e5df84df5e7f8144960839ae6705a4f29c95dbb70d23282f7bdde208051d5f8",
+      "git_blob": "6b82aefb473c7554100d3b328c8e16fc51553633"
+    },
+    {
+      "文件": "Word桥接/兼容/表格刷新.cs",
+      "sha256": "3993d1a29cf085f2a51557d6fdaed832e2eb523773d537c419e6e908f0ce9bfa",
+      "git_blob": "c0567a8e4a464c331b7448e5c2cb67c22b72718e"
+    },
+    {
+      "文件": "Word桥接/兼容/表格对应.cs",
+      "sha256": "58e9ebffa4f9b8c06a3889c43844198efbbfc8d43a964e14ddf881d8720dde2e",
+      "git_blob": "02cc232601520454ac7a22daa950b68e63a89d93"
+    },
+    {
+      "文件": "Word桥接/兼容/连接管理.cs",
+      "sha256": "b80dd3e24882dd16533b400508315bd0f67832623c5afa1c2dd89bc06418965f",
+      "git_blob": "3b22b1398b60638001235281c567b07d3bb141c9"
+    },
+    {
+      "文件": "Word桥接/复用核心/CommonFunction.cs",
+      "sha256": "3d12dba8171b269ab2bee3eccb092e695732ab44e2bb0753b8775002813300a5",
+      "git_blob": "040f4d35e6a85ed986997055b08d5ec967c069bd"
+    },
+    {
+      "文件": "Word桥接/复用核心/DalSetting.cs",
+      "sha256": "d09d187d24998cc9c94c34b26c2225593cec344cbe23a9ff06b1dbbe93593f2f",
+      "git_blob": "4a88505d1cc9b64bcf12284882f66dd35a6745d2"
+    },
+    {
+      "文件": "Word桥接/复用核心/DocLink.cs",
+      "sha256": "3b344c60b24f01ac9b329155d1868c431ced337854d6893d2f58a4c3b48132aa",
+      "git_blob": "4512b7a8c798858a82c72b5232ff5b727b1be431"
+    },
+    {
+      "文件": "Word桥接/复用核心/DocLinkInfo.cs",
+      "sha256": "e4ee742111abb53deab23d206285a21fa4f1562ef5c55943f3da38fc926edac1",
+      "git_blob": "46e713d81c12eaf1fea02d9b6b5d84841c12c403"
+    },
+    {
+      "文件": "Word桥接/复用核心/DocLinkMode.cs",
+      "sha256": "9b3bbc4c0ccf1629c2a53e21278cd7b70acda47f9aa6abbb24e79572deac8bef",
+      "git_blob": "a3f798344650e687fe834b34e46ee887984484cc"
+    },
+    {
+      "文件": "Word桥接/复用核心/MergeCalc.cs",
+      "sha256": "120c8d93d1094798635905d7a4f2b367abd47c8a7a9f03327072499315d9d16b",
+      "git_blob": "680782d9fc7e795f3aaed2cb4057f8b32d8eeb46"
+    },
+    {
+      "文件": "Word桥接/复用核心/StyleSetting.cs",
+      "sha256": "894b37d2571bd252440b52f2999c2b2c659c236b2ab568b597adf8de9885de54",
+      "git_blob": "aa470c08ffec95371706d513609dc099ef6d2746"
+    },
+    {
+      "文件": "Word桥接/复用核心/WorkTableInfo.cs",
+      "sha256": "0bcbcbd0fb1a4636acf65913c422378e84052bf3c25b86ed59798d5a6613e5fe",
+      "git_blob": "bcf5dc0836d393fb72f1d4ad7c01d1e3a70ac887"
+    },
+    {
+      "文件": "Word桥接/复用核心/安全保存.cs",
+      "sha256": "db472944e238fd0fde1559217633eb9e7641f5ce3a8ae8a7403e5a19f9b4a230",
+      "git_blob": "f70049c2e0f58cd4ee99a63556978c6d81afdc44"
+    },
+    {
+      "文件": "Word桥接/复用核心/底稿取数.cs",
+      "sha256": "98cad1234dd3bc819116a630c0c2727f84a75147d39b950831c2b2995ff8bd47",
+      "git_blob": "7d10d732ca8f9d0aae1ca9aa092bcb9bd02b13b8"
+    },
+    {
+      "文件": "Word桥接/复用核心/报告读取.cs",
+      "sha256": "c0223d0a7781a81fe5564d8f313370cacf38e763b09e68e0319d3ab244349c9c",
+      "git_blob": "20f977fca3733da90c47c7e0ba0f12de3d367eb0"
+    },
+    {
+      "文件": "Word桥接/复用核心/来源.json",
+      "sha256": "6e9f3cf9b4ad3daa054ffe9753097aca713812e84181ac65c3e1d2e46a0ef1e6",
+      "git_blob": "adb264712dc4be03a8a3f1cb3664b092131bd381"
+    },
+    {
+      "文件": "Word桥接/复用核心/格式方案.cs",
+      "sha256": "86d0e0975ecb07f7d3a3444b534f80af2a6d5fa6d2019d4e1764468bd7be3155",
+      "git_blob": "ec6a3bb225a54e5026f8c70b4b227bc897b52a7d"
+    },
+    {
+      "文件": "Word桥接/复用核心/正文链接.cs",
+      "sha256": "f2a74258610e33a68e9fffa96fda6153e4d71474aeabed2dc3eb1c00f4f42a37",
+      "git_blob": "e3a43ab0737924ab5a6a9d2d7b39f23b9093bf23"
+    },
+    {
+      "文件": "Word桥接/复用核心/连接记录.cs",
+      "sha256": "5aff4efb2f64d770bc47a5e56a3182edaeb17a4c004e7f190b3c2398afc93018",
+      "git_blob": "4e0bb1ce9618ed697ee6cae1d38ad3219d534ffe"
+    },
+    {
+      "文件": "Word桥接/桥接入口.cs",
+      "sha256": "53d8bb2e03c376edc0ec3b0b04b54a3cf93eaa21ee22744b7a454e124116d1dc",
+      "git_blob": "ecc1b70dba670d7aa9dd007f3a6795f14efc7d6f"
+    }
+  ]
+}

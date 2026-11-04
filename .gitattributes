@@ -1,0 +1,6 @@
+# 迁入桥接保留上游原始字节，避免Windows自动换行改写源码指纹。
+Word桥接/**/*.cs -text whitespace=trailing-space,space-before-tab,cr-at-eol
+Word桥接/*.csproj -text whitespace=trailing-space,space-before-tab,cr-at-eol
+Word桥接/复用核心/来源.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
+# 该上游原文件自带末尾空行，保留原样；仍检查行尾空格。
+Word桥接/复用核心/正文链接.cs whitespace=blank-at-eol,space-before-tab,cr-at-eol,-blank-at-eof
