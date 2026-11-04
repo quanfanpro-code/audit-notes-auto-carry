@@ -25,7 +25,15 @@ def 读索引(运行目录):
     路径 = Path(运行目录) / "接续索引.json"
     if not 路径.is_file():
         return None
-    return json.loads(路径.read_text(encoding="utf-8"))
+    # shortcut: Windows 上读端正好撞上 os.replace 的瞬间会报 WinError 32/5；
+    # 目标是原子的，重试几次一定读到完整的一份，读不到就照实抛
+    for 次 in range(5):
+        try:
+            return json.loads(路径.read_text(encoding="utf-8"))
+        except PermissionError:
+            if 次 == 4:
+                raise
+            time.sleep(0.02)
 
 
 def 待办步骤(索引: dict):

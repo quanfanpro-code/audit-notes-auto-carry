@@ -1,5 +1,9 @@
 # coding: utf-8
-"""只呈现文件明确记录的网格和合并，不判断表头角色或业务身份。"""
+"""只呈现文件明确记录的网格和合并，不判断表头角色或业务身份。
+
+B 侧用「可见表格文字」：只呈现本次可见集合里的位置；隐藏行列、打印区域外一律标成不可见，
+跨边界合并的起点不可见时只留结构标记，不补取隐藏起点的正文。
+"""
 import json
 from openpyxl.utils.cell import range_boundaries, coordinate_to_tuple, get_column_letter
 
@@ -98,6 +102,97 @@ def workbook_table_text(snapshot, areas):
 
 
 # —— 新计划接口 ——
-def 表格转文字(快照, 范围):
-    """范围内表格转保结构文字（复用 workbook_table_text）。范围={"sheet","range"}。"""
+def 表格转文字(快照, 范围, 用可见范围=False):
+    """范围内表格转保结构文字（复用 workbook_table_text）。范围={"sheet","range"}。
+
+    用可见范围=True 时只呈现 B 侧本次可见集合里的位置：隐藏行列、打印区域外的内容
+    一律标成不可见，隐藏起点的合并正文不补取。
+    """
+    if 用可见范围:
+        return 可见表格文字(快照, 范围["sheet"], 范围["range"])
     return workbook_table_text(快照, [范围])
+
+
+def 可见表格文字(快照, 工作表, 范围):
+    """按本次可见集合呈现网格：每个位置要么可见（含原格空白），要么明确写不可见。"""
+    from .表格 import 取可见集
+
+    可见 = 取可见集(快照, 工作表)
+    if 可见 is None:
+        raise RuntimeError(f"工作表 {工作表} 没有可见范围记录，不能按可见范围出材料")
+    if 可见.空():
+        raise RuntimeError(f"工作表 {工作表} 没有可见内容：{可见.原因 or '可见范围为空白'}")
+    左, 顶, 右, 底 = range_boundaries(str(范围))
+    表 = next(s for s in 快照["sheets"] if s["name"] == 工作表)
+    格 = 表.get("cells") or {}
+    values = {}
+    for cell in 格.values():
+        if 顶 <= cell["row"] <= 底 and 左 <= cell["column"] <= 右 and 可见.含(cell["row"], cell["column"]):
+            values[(cell["row"], cell["column"])] = cell
+
+    并入, 锚范围 = {}, {}
+    for 合并 in 表.get("merges") or []:
+        m左, m顶, m右, m底 = range_boundaries(合并)
+        if m右 < 左 or m左 > 右 or m底 < 顶 or m顶 > 底:
+            continue
+        锚 = (m顶, m左)
+        成员 = [(r, c) for r in range(max(m顶, 顶), min(m底, 底) + 1)
+                for c in range(max(m左, 左), min(m右, 右) + 1)]
+        if 可见.含(*锚):
+            锚范围[锚] = 合并
+            for m in 成员:
+                if m != 锚 and 可见.含(*m):
+                    并入[m] = 合并
+        else:
+            for m in 成员:
+                if 可见.含(*m):
+                    并入[m] = ""                    # 起点不可见：只留结构标记，不取正文
+
+    行们 = [r for r in 可见.行们() if 顶 <= r <= 底]
+    列们 = [c for c in range(左, 右 + 1)]
+    lines = ["以下为本工作表本次可见单元格；不可见表示隐藏行列或打印区域外，未参与识别。",
+             '| 行号 | ' + ' | '.join(get_column_letter(c) for c in 列们) + ' |',
+             '| --- | ' + ' | '.join('---' for _ in 列们) + ' |']
+    for row in 行们:
+        fields = []
+        for column in 列们:
+            at = (row, column)
+            坐标 = get_column_letter(column) + str(row)
+            if not 可见.含(row, column):
+                fields.append('不可见（隐藏或打印区域外）')
+                continue
+            if at in 并入:
+                if 并入[at]:
+                    text = '并入' + 并入[at]
+                else:
+                    text = '合并从属（起点不可见，不取隐藏起点文字）'
+                cell = values.get(at) or {}
+                if cell.get('value') not in (None, '') or cell.get('formula'):
+                    text += '；本位置另有原记录：' + json.dumps(
+                        cell.get('value'), ensure_ascii=False, default=str)
+                fields.append(text)
+                continue
+            cell = values.get(at)
+            if cell is None:
+                fields.append('未记录此位置的内容')
+                continue
+            if cell.get('formula'):
+                缓存 = cell.get('cached_value')
+                if 缓存 is None:
+                    text = 坐标 + ' 〔公式无保存结果〕'
+                elif 缓存 == '':
+                    text = 坐标 + ' ' + json.dumps(cell.get('value'), ensure_ascii=False,
+                                                 default=str) + '〔公式，缓存为空字符串〕'
+                else:
+                    text = 坐标 + ' ' + json.dumps(缓存, ensure_ascii=False, default=str)
+            else:
+                值 = cell.get('value')
+                text = 坐标 + ' ' + json.dumps(值, ensure_ascii=False, default=str)
+                if 值 in (None, ''):
+                    text += '〔原格空白〕'
+            if at in 锚范围:
+                text += '〔合并范围：' + 锚范围[at] + '〕'
+            fields.append(text)
+        lines.append('| ' + str(row) + ' | ' + ' | '.join(
+            x.replace('|', '\\|').replace('\r', '\\r').replace('\n', '\\n') for x in fields) + ' |')
+    return '\n'.join(lines)

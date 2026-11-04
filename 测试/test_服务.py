@@ -126,6 +126,11 @@ def test_待答复在进度里看得见(tmp_path, monkeypatch):
     c = TestClient(应用)
     c.post("/api/任务", json={"word": "原.docx", "b表": str(b路径), "金标准": str(金路径)})
     p = _等(c, "identify_a")
+    for _ in range(40):                    # 待答复与步骤同一次落盘；读端可能撞上替换瞬间，给它留出重读
+        if p.get("待答复"):
+            break
+        time.sleep(0.05)
+        p = c.get("/api/进度").json()
     assert p["步骤"] == "identify_a"
     assert p["待答复"] and pathlib.Path(p["待答复"][0], "材料.txt").is_file()   # 卡在哪份材料要说得出
 

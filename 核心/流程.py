@@ -5,6 +5,10 @@
 - 每个产物一保存就登记路径和哈希；文件被人改过、或没有可信记录，一律另存不覆盖。
 - 任务开始登记输入指纹（三个输入的路径与哈希、数据表工作表）；续跑对不上就拒绝，不混用旧结果。
 - 某张表回写失败时，把那张表的变更恢复原值再交付其余表，绝不因为一张表全盘作废。
+
+跨任务复用也在这里收口：任务开始刷新本机识别记录簿；上游布局在自身覆盖检查通过后发布，
+第三遍候选等配对检查后才发布；标题在两侧配对后按本次 B 的期间日期生成，生成不了整组撤回，
+保证 Excel 与 Word 对同一组使用同一结果。
 """
 import hashlib
 import json
@@ -18,7 +22,11 @@ from .提取 import 提取任务
 from .接续 import 读索引, 写索引
 from .搬运 import 生成更新表, 保存更新表
 from .结构维护 import 读结构操作
+from .标题 import 生成本次标题
 from .识别 import 识别一侧
+from .共用记录簿 import 取记录簿, 已启用
+from . import 复用接入 as 接入
+from . import 复用证据 as 证据模块
 
 
 def _哈希(路径) -> str:
@@ -107,11 +115,77 @@ def _错误里的区域(消息: str, 区域到组: dict):
     return None
 
 
+_配对错误 = ("同侧重复", "口径冲突", "例外未执行", "列标签缺失", "越界解释")
+
+
+def _发布第三遍(簿, 运行目录, 清单, A结构, B结构, 金标准版本, 规则版本) -> list:
+    """第三遍在本组检查与适用配对检查之后发布；配对暴露的识别错误阻止入库。"""
+    if 簿 is None:
+        return []
+    侧按表 = {(x.get("工作表") or ""): "A" for x in A结构}
+    侧按表.update({(x.get("工作表") or ""): "B" for x in B结构})
+    错误 = set()
+    for 条 in 清单 or []:
+        if 条.get("状态") != "未对应":
+            continue
+        if str(条.get("原因") or "") not in _配对错误:
+            continue
+        for 键 in ("a格", "b格"):
+            格 = 条.get(键)
+            if not 格:
+                continue
+            侧 = 侧按表.get(str(格).split("!", 1)[0])
+            if 侧:
+                错误.add((侧, str(条.get("表组") or "")))
+    结果 = []
+    for 侧 in ("A", "B"):
+        候选 = _读jsonl(运行目录 / f"候选发布_{侧}.jsonl")
+        记录路径 = 运行目录 / f"复用记录_{侧}.json"
+        if not 候选:
+            continue
+        记录 = json.loads(记录路径.read_text(encoding="utf-8")) if 记录路径.is_file() else {}
+        发布们 = 记录.setdefault("发布", [])
+        for 项 in 候选:
+            if (侧, 项.get("表组")) in 错误:
+                发布们.append({"步骤": "第三遍", "表组": 项.get("表组"), "状态": "未发布",
+                            "原因": "配对暴露识别错误，本组不入库"})
+                结果.append({"侧": 侧, "表组": 项.get("表组"), "状态": "未发布",
+                          "原因": "配对暴露识别错误"})
+                continue
+            成功, 值 = 接入.发布记录(簿, 侧, "第三遍", 项["证据"], 项["解释"],
+                                金标准版本, 规则版本, 项.get("来源"), str(运行目录),
+                                形状键=项.get("形状键"), 依赖=项.get("依赖"))
+            发布们.append({"步骤": "第三遍", "表组": 项.get("表组"),
+                        "状态": "已发布" if 成功 else "未发布",
+                        "版本": 值 if 成功 else None, "原因": "" if 成功 else 值})
+            结果.append({"侧": 侧, "表组": 项.get("表组"),
+                      "状态": "已发布" if 成功 else "未发布", "版本": 值 if 成功 else None,
+                      "原因": "" if 成功 else 值})
+        记录路径.write_text(json.dumps(记录, ensure_ascii=False, indent=2), encoding="utf-8")
+    return 结果
+
+
 def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     运行目录 = Path(运行目录)
     运行目录.mkdir(parents=True, exist_ok=True)
     索引 = 读索引(运行目录) or {"步骤": "extract", "已完成范围": [], "产物": {}}
     产物 = 索引.setdefault("产物", {})
+
+    # 任务入口统一刷新记录簿索引：同一服务进程的后续任务与直接调用共用同一实例
+    簿, 复used = None, {"可用": False, "原因": "跨任务复用已关闭"}
+    if 已启用(输入):
+        try:
+            簿 = 取记录簿(输入.get("识别记录目录"))
+            if 簿.目录 is None:
+                簿, 复used = None, {"可用": False, "原因": "未找到可用的本机记录目录"}
+            else:
+                快照 = 簿.刷新()
+                复used = {"可用": bool(快照.get("可用")), "代次": 快照.get("代次"),
+                         "原因": 快照.get("原因") or ""}
+        except Exception as e:
+            簿, 复used = None, {"可用": False, "原因": f"记录簿不可用：{e}"}
+    索引["复用"] = 复used
+    写索引(运行目录, 索引)
 
     指纹 = _输入指纹(输入)
     旧指纹 = 索引.get("输入指纹")
@@ -149,7 +223,7 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
                     允许科目 = {x["科目"] for x in 甲侧}   # 粗比：B 只精读 A 也有的科目
         try:
             结果 = 识别一侧(配置, 表文件, 侧, 运行目录, 金标准, 表上下文,
-                       取消=取消, 只跑表=只跑表, 允许科目=允许科目)
+                       取消=取消, 只跑表=只跑表, 允许科目=允许科目, 簿=簿)
         except Exception as e:
             索引 = 读索引(运行目录) or 索引
             索引.update({"步骤": "识别失败", "识别错误": str(e)})
@@ -189,6 +263,8 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
 
     清单 = 建立对应(a记录, b记录, A结构, B结构)
     _写jsonl(运行目录 / "对应清单.jsonl", 清单)
+    _发布第三遍(簿, 运行目录, 清单, A结构, B结构,
+            证据模块.内容摘要(输入.get("金标准")), 证据模块.规则摘要())
     索引["步骤"] = "carry"
     写索引(运行目录, 索引)
 
@@ -199,9 +275,16 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     问题 = (_读jsonl(运行目录 / "识别问题_A.jsonl") + _读jsonl(运行目录 / "识别问题_B.jsonl")
           + 问题 + 粗比问题 + 超额问题)
     a按格 = {r.get("格"): r for r in a记录}
-    可改组 = {(a按格[格].get("科目"), a按格[格].get("表名")) for 格 in 变更 if 格 in a按格}
-    标题更新 = 读标题更新([表 for 表 in A结构
-                      if (表.get("科目"), 表.get("表名")) in 可改组])
+    标题更新, 标题问题, 标题撤回组, 标题证据 = 生成本次标题(
+        A结构, B结构, 上下文, 变更, b记录)
+    问题 += 标题问题
+    if 标题撤回组:
+        变更 = {格: 值 for 格, 值 in 变更.items()
+                if (a按格.get(格, {}).get("科目"), a按格.get(格, {}).get("表名")) not in 标题撤回组}
+        问题.append({"原因": "标题无法按本次 B 日期生成，相关组的标题与数值一并保持原样",
+                    "组": [f"{科}／{名}" for 科, 名 in sorted(标题撤回组)]})
+    (运行目录 / "标题证据.json").write_text(
+        json.dumps(标题证据, ensure_ascii=False, indent=2), encoding="utf-8")
     _写jsonl(运行目录 / "问题清单.jsonl", 问题)
 
     已录哈希 = 索引.get("产物哈希") or {}

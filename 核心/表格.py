@@ -1,5 +1,10 @@
 # coding: utf-8
-"""Excel 快照读取：抄自老项目 附注更新/表格.py（read_workbook 及依赖，逐字保留）。"""
+"""Excel 快照读取：抄自老项目 附注更新/表格.py（read_workbook 及依赖，逐字保留）。
+
+另负责 B 端可见范围：打印区域按 XML 原文解析（openpyxl 会悄悄丢掉越界定义，不能靠它），
+取各打印区域并集、扣除隐藏行列；没有打印区域时取可见且有值或公式的内容范围。
+每个工作表随快照保存「可见范围」，全文材料、定位、精读、铺格、合集与完整性共用这一份集合。
+"""
 from __future__ import annotations
 import ast
 import copy
@@ -141,6 +146,192 @@ def _empty_formula_cached_strings(path):
     return result
 
 
+# —— B 端可见范围：一次构造，全文材料、查库重定位、精读、铺格、合集与完整性共用 ——
+
+def _打印区域表(path):
+    """直接从工作簿 XML 读每个工作表的打印区域。
+
+    openpyxl 遇到越界或写坏的打印区域会给个警告、然后把定义丢掉，随后整张表读出来——
+    那正好是本需求禁止的“回退整表”。这里自己解析原文：读不出就报错，绝不悄悄扩大范围。
+    """
+    ns = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+    出 = {}
+    with ZipFile(path) as archive:
+        try:
+            工作簿 = ET.fromstring(archive.read('xl/workbook.xml'))
+        except KeyError:
+            return 出
+        表们 = 工作簿.find(ns + 'sheets')
+        名们 = 工作簿.find(ns + 'definedNames')
+        if 表们 is None or 名们 is None:
+            return 出
+        序 = {s.get('name'): i for i, s in enumerate(list(表们))}
+        for 定义 in 名们.findall(ns + 'definedName'):
+            if 定义.get('name') != '_xlnm.Print_Area':
+                continue
+            局部 = 定义.get('localSheetId')
+            try:
+                行号 = int(局部) if 局部 not in (None, '') else None
+            except ValueError:
+                raise WorkbookError(f"打印区域的作用范围无法解析：{局部}") from None
+            名 = next((n for n, i in 序.items() if i == 行号), None)
+            if 名 is None:
+                raise WorkbookError(f"打印区域引用了不存在的工作表序号：{局部}")
+            出[名] = _拆打印区域(str(定义.text or ''), 名)
+    return 出
+
+
+def _拆打印区域(文本, 名):
+    if not 文本.strip():
+        return []
+    段们, 出 = [], []
+    for 片 in 文本.split(','):
+        片 = 片.strip()
+        if not 片:
+            continue
+        if '!' in 片:
+            段们.append(片.rsplit('!', 1)[1])
+        elif 段们:
+            段们.append(片)          # 同一工作表连续写多个区域时省略了表名
+        else:
+            段们.append(片)
+    for 段 in 段们:
+        文 = 段.replace('$', '').strip().upper()
+        try:
+            左, 顶, 右, 底 = range_boundaries(文)
+        except (ValueError, TypeError):
+            raise WorkbookError(f"{名} 的打印区域无法解析：{段}") from None
+        if not all(type(v) is int for v in (左, 顶, 右, 底)) or not (
+                1 <= 左 <= 右 <= 16384 and 1 <= 顶 <= 底 <= 1048576):
+            raise WorkbookError(f"{名} 的打印区域无效：{段}")
+        出.append((左, 顶, 右, 底))
+    return 出
+
+
+def _并段(行段):
+    """同一行里相邻或重叠的列区间合并，保留每段可见列，不把隐藏列并回来。"""
+    出 = {}
+    for 行, 段们 in 行段.items():
+        合 = []
+        for 左, 右 in sorted(段们):
+            if 合 and 左 <= 合[-1][1] + 1:
+                合[-1][1] = max(合[-1][1], 右)
+            else:
+                合.append([左, 右])
+        出[行] = 合
+    return 出
+
+
+def _有内容(值):
+    """有值（含零、含假）算内容；只有空格或格式不算。"""
+    if 值 is None:
+        return False
+    if isinstance(值, str) and not 值.strip():
+        return False
+    return True
+
+
+def _可见记录(sheet, 打印, cells, 列隐藏):
+    """按需求第五节的规则确定可见坐标集合：打印区域并集去重、扣隐藏行列；无打印区域取可见内容。"""
+    if sheet.sheet_state != "visible":
+        return {"来源": "隐藏工作表", "矩形": [], "行": {},
+                "原因": "工作表处于隐藏状态，不贡献可见内容"}
+
+    def 行可见(行):
+        return not (sheet.row_dimensions.get(行) and sheet.row_dimensions[行].hidden)
+
+    def 列可见(列):
+        return not any(左 <= 列 <= 右 for 左, 右 in 列隐藏)
+
+    矩形, 行段, 原因 = [], {}, ""
+    if 打印:
+        来源 = "打印区域"
+        for 左, 顶, 右, 底 in 打印:
+            矩形.append([左, 顶, 右, 底])
+            段们 = []
+            for 列 in range(左, 右 + 1):
+                if not 列可见(列):
+                    continue
+                if 段们 and 列 == 段们[-1][1] + 1:
+                    段们[-1][1] = 列
+                else:
+                    段们.append([列, 列])
+            if not 段们:
+                continue
+            for 行 in range(顶, 底 + 1):
+                if 行可见(行):
+                    行段.setdefault(行, []).extend([list(x) for x in 段们])
+        行段 = _并段(行段)
+        if not 行段:
+            原因 = "打印区域没有可见内容"
+    else:
+        来源 = "可见内容"
+        内容 = [(c["row"], c["column"]) for c in cells.values()
+                if c.get("formula") or _有内容(c.get("value"))]
+        行号们 = sorted({r for r, _ in 内容 if 行可见(r)})
+        列号们 = sorted({c for _, c in 内容 if 列可见(c)})
+        if 行号们 and 列号们:
+            矩形 = [[列号们[0], 行号们[0], 列号们[-1], 行号们[-1]]]
+            段们 = []
+            for 列 in 列号们:
+                if 段们 and 列 == 段们[-1][1] + 1:
+                    段们[-1][1] = 列
+                else:
+                    段们.append([列, 列])
+            行段 = {r: [list(x) for x in 段们] for r in 行号们}
+            格数 = len(行号们) * len(列号们)
+            if 格数 > 500000:
+                raise WorkbookError("工作表的可见内容范围超过50万格，请核实是否有无用格式或远距离零星内容")
+        else:
+            原因 = "工作表没有可见内容"
+    return {"来源": 来源, "矩形": 矩形, "行": {str(k): v for k, v in 行段.items()}, "原因": 原因}
+
+
+class 可见集:
+    """B 端可见单元格集合：成员按原工作表原行列识别，矩形只是查找边界。"""
+
+    def __init__(self, 记录: dict):
+        self.工作表 = 记录.get("工作表") or ""
+        self.来源 = 记录.get("来源") or ""
+        self.原因 = 记录.get("原因") or ""
+        self.矩形 = [tuple(x) for x in (记录.get("矩形") or [])]
+        self.行段 = {int(k): [tuple(x) for x in v] for k, v in (记录.get("行") or {}).items()}
+
+    def 含(self, 行, 列) -> bool:
+        return any(左 <= 列 <= 右 for 左, 右 in self.行段.get(int(行), ()))
+
+    def 行们(self) -> list:
+        return sorted(self.行段)
+
+    def 列们(self) -> list:
+        列们 = set()
+        for 段们 in self.行段.values():
+            for 左, 右 in 段们:
+                列们.update(range(左, 右 + 1))
+        return sorted(列们)
+
+    def 格数(self) -> int:
+        return sum(右 - 左 + 1 for 段们 in self.行段.values() for 左, 右 in 段们)
+
+    def 空(self) -> bool:
+        return not self.行段
+
+    def 说明(self) -> str:
+        return f"{self.工作表}：{self.来源}，{self.格数()} 格" + (f"；{self.原因}" if self.原因 else "")
+
+
+def 取可见集(快照, 工作表名):
+    """从快照取该工作表的可见集；旧快照没有可见范围记录时返回 None。"""
+    for 表 in 快照.get("sheets") or []:
+        if 表.get("name") != 工作表名:
+            continue
+        记录 = 表.get("可见范围")
+        if 记录 is None:
+            return None
+        return 可见集({"工作表": 工作表名, **记录})
+    return None
+
+
 def read_workbook(path,context=None,areas=None):
     path=Path(path).resolve()
     before=file_hash(path)
@@ -151,11 +342,13 @@ def read_workbook(path,context=None,areas=None):
         omissions_by_sheet=_word_omissions(out["context"],w)
         cache=load_workbook(path,data_only=True,keep_links=True)
         empty_strings=_empty_formula_cached_strings(path)
+        打印们=_打印区域表(path)
         for d in _definitions(w):
             for sheet,address in _destinations(d):out["names"].setdefault(d.name,[]).append({"sheet":sheet,"range":address})
         word_ranges=_word_table_ranges(out["context"],w,out["names"])
         for s in w:
             physical_boxes=[range_boundaries(item["range"]) for item in (word_ranges or {}).get(s.title,[])]
+            打印=打印们.get(s.title,[])
             omissions=omissions_by_sheet.get(s.title,[])
             omission_boxes=[range_boundaries(item["range"]) for item in omissions]
             def omitted(c):return any(l<=c.column<=r and t<=c.row<=b for l,t,r,b in omission_boxes)
@@ -183,6 +376,7 @@ def read_workbook(path,context=None,areas=None):
                 if not all(type(v) is int for v in box) or not (1<=box[0]<=box[2]<=16384 and 1<=box[1]<=box[3]<=1048576):
                     raise WorkbookError("识别给定的业务范围无效")
                 boxes.append(box)
+            boxes.extend(打印)               # 打印区域内的空白格也要有记录，才能判断“原格空白”与“区域外”
             max_row=max([r for r,c in anchors]+[b[3] for b in boxes+physical_boxes]+[1])
             max_col=max([c for r,c in anchors]+[b[2] for b in boxes+physical_boxes]+[1])
             hidden=[(d.min or column_index_from_string(k),d.max or column_index_from_string(k)) for k,d in s.column_dimensions.items() if d.hidden]
@@ -208,7 +402,7 @@ def read_workbook(path,context=None,areas=None):
                 c["hidden_column"]=any(lo<=c["column"]<=hi for lo,hi in hidden)
                 c["hidden_sheet"]=s.sheet_state!="visible"
                 c["hidden"]=c["hidden_row"] or c["hidden_column"] or c["hidden_sheet"]
-            out["sheets"].append({"name":s.title,"hidden":s.sheet_state!="visible","hidden_rows":[r for r,d in s.row_dimensions.items() if d.hidden],"hidden_columns":hidden,"max_row":max_row,"max_column":max_col,"merges":[str(m) for m in s.merged_cells.ranges],"cells":cells})
+            out["sheets"].append({"name":s.title,"hidden":s.sheet_state!="visible","hidden_rows":[r for r,d in s.row_dimensions.items() if d.hidden],"hidden_columns":hidden,"max_row":max_row,"max_column":max_col,"merges":[str(m) for m in s.merged_cells.ranges],"cells":cells,"可见范围":_可见记录(s,打印,cells,hidden)})
             if omissions:out["sheets"][-1]["structural_omissions"]=copy.deepcopy(omissions)
             if word_ranges is not None:out["sheets"][-1]["word_table_ranges"]=copy.deepcopy(word_ranges.get(s.title,[]))
         out["external_references"]=_external(w)
