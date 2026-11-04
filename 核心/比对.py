@@ -72,6 +72,10 @@ def _是名单项(记录们: list) -> bool:
     return any(r.get("序号") is not None for r in 记录们)
 
 
+def _序号(项表: dict, 键) -> int | None:
+    return next((r.get("序号") for r in 项表[键] if r.get("序号") is not None), None)
+
+
 def _键(记录) -> tuple:
     """完整配对键。期间只在金标准要求时才进；汇总格再加分组。"""
     维度 = 记录.get("维度值") or {}
@@ -309,11 +313,14 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
         if 踢出:
             乙 = [r for r in 乙 if _项键(r) not in 踢出]
         清尾项 = set()
-        if len(b名单) < len(a名单) and _完整性好(B该表):
+        if _完整性好(B该表):
             明确零项 = bool(b名单) or bool(B该表.get("空名单"))
             if 明确零项:
-                # 只清“干净”的尾项：项里有格已经交人工，就不是“B 无此项”，得整项保留
-                清尾项 = {k for k in a名单[len(b名单):] if not _项有失败(a项[k])}
+                # 尾巴按 B 的最大序号认，不按项数：B 中间有全零项时项数会少，
+                # 按数量截会把后面仍在 B 里的非零项误清（全零项也占着序号位）
+                b末 = max((_序号(b项, k) for k in b全部), default=None)
+                清尾项 = {k for k in a名单
+                        if (b末 is None or _序号(a项, k) > b末) and not _项有失败(a项[k])}
         清单 += _配对(甲, 乙, 清尾项)
         for 键 in 超额项:
             清单.append(_超额项(B该表, b项[键]))

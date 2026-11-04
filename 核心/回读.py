@@ -18,14 +18,21 @@ def _小数位(值) -> int:
 
 
 def _按显示精度一致(期望, 实际) -> bool:
-    """Word 单元格按自己的格式显示，回读只能比到它显示出来的精度。"""
-    try:
-        甲, 乙 = float(期望), float(实际)
-    except (TypeError, ValueError):
+    """Word 单元格按自己的格式显示，回读只能比到它显示出来的精度。
+
+    只有两边都是数字才按精度比。文字格（编号、账号）逐字比：
+    按数字比会把 "00123" 和 "123"、"1.00" 和 "1" 判成一致，文本被改坏就漏报了。
+    """
+    if isinstance(期望, bool) or isinstance(实际, bool):
         return False
-    if 甲 == 乙:
-        return True
-    return abs(甲 - 乙) <= 0.5 * 10 ** (-_小数位(实际)) + 1e-9
+    if isinstance(期望, (int, float)) and isinstance(实际, (int, float)):
+        甲, 乙 = float(期望), float(实际)
+        if 甲 == 乙:
+            return True
+        return abs(甲 - 乙) <= 0.5 * 10 ** (-_小数位(实际)) + 1e-9
+    甲文 = str("" if 期望 is None else 期望).strip()
+    乙文 = str("" if 实际 is None else 实际).strip()
+    return 甲文 == 乙文
 
 
 def 回读验证(word输出, 变更清单: dict, 临时目录) -> list:

@@ -157,6 +157,7 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
             return 索引
 
     索引 = 读索引(运行目录) or 索引
+    索引.pop("待答复", None)      # 两侧识别都过了，旧的“待答复”目录不再提示
     a记录 = _读jsonl(运行目录 / "A合集.jsonl")
     b记录 = _读jsonl(运行目录 / "B合集.jsonl")
     结构 = _读jsonl(运行目录 / "结构清单.jsonl")

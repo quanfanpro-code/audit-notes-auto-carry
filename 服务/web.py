@@ -74,7 +74,11 @@ def 开始任务(请求: dict):
                 raise HTTPException(status_code=400, detail="没有可续跑的任务")
             运行目录 = 候选[-1]            # 续跑：沿用原来的目录，不新建
     else:
-        运行目录 = 运行根 / ("任务_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+        基 = 运行根 / ("任务_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+        运行目录, 序 = 基, 1
+        while 运行目录.exists():          # 同一秒连开两个任务，目录名要避让，不能覆盖
+            序 += 1
+            运行目录 = 基.with_name(f"{基.name}_{序}")
     try:
         配置 = 读取模型配置(应用.state.配置路径)
     except Exception:

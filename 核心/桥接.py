@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 桥接程序 = Path(__file__).resolve().parent.parent / "Word桥接" / "发布" / "WordBridge.exe"
+桥接超时秒 = 1800      # 大附注打开+写回要几分钟，给足；卡住就明确报错，不再无限等
 
 
 def 调用桥接(请求: dict, 工作目录=None, exe=None, 前缀=None):
@@ -22,8 +23,12 @@ def 调用桥接(请求: dict, 工作目录=None, exe=None, 前缀=None):
     临时 = 工作目录 / "桥接临时"
     临时.mkdir(exist_ok=True)
     环境 = {**os.environ, "TEMP": str(临时), "TMP": str(临时)}
-    完成 = subprocess.run(命令, capture_output=True, encoding="utf-8", errors="strict",
-                     env=环境, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        完成 = subprocess.run(命令, capture_output=True, encoding="utf-8", errors="strict",
+                         env=环境, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                         timeout=桥接超时秒)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"Word桥接超过 {桥接超时秒} 秒没有返回，已强制结束：{命令[-1]}") from e
     try:
         结果 = json.loads(完成.stdout.lstrip("﻿").strip())
     except json.JSONDecodeError as e:

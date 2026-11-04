@@ -10,7 +10,9 @@ document.querySelectorAll(".页签").forEach((b) => b.addEventListener("click", 
 
 async function 请求(url, 体) {
   const r = await fetch(url, 体 ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(体) } : {});
-  return r.json();
+  const 结果 = await r.json().catch(() => ({}));
+  // 后端失败走 HTTP 状态码 + detail，不会给 {错误}；不转成“错误”，前端就当成成功了
+  return r.ok ? 结果 : { ...结果, 错误: 结果.错误 || 结果.detail || ("HTTP " + r.status) };
 }
 
 // 选文件（后端弹 Windows 原生窗口，记真实路径）
