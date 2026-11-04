@@ -15,6 +15,7 @@ from 核心.流程 import 运行任务
 from 核心.共用记录簿 import 记录簿, 发布事件
 from 核心.复用证据 import 证据键, 解释键, 版本号
 from 测试.test_三遍复用 import _金标准, _造, _模型, 科目表
+from 测试.安全目录 import 安全记录目录
 
 语料 = [("一", 科目表, 2025), ("二", [科目表[0], 科目表[2]], 2026), ("三", 科目表, 2027)]
 
@@ -109,7 +110,7 @@ def _基线(tmp_path, monkeypatch, 金, 语料, 打印=None):
 
 def _复用跑(tmp_path, monkeypatch, 金, 语料, 打印=None, 记录目录=None, 语料override=None):
     monkeypatch.delenv("审计附注_复用", raising=False)
-    记录目录 = 记录目录 or (tmp_path / "记录")
+    记录目录 = 记录目录 or (安全记录目录())
     出 = []
     for 名, 科目, 年 in (语料override or 语料):
         出.append(_规范(_跑(tmp_path / f"复用{名}", 名, 科目, 年, 记录目录, 金, monkeypatch,
@@ -153,7 +154,7 @@ def test_缩小打印区域与隐藏列后结果仍与基线一致(tmp_path, mon
 def test_金标准版本变化后旧记录退出自动复用(tmp_path, monkeypatch):
     金 = _金标准(tmp_path)
     基线 = _基线(tmp_path, monkeypatch, 金, 语料)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     _复用跑(tmp_path, monkeypatch, 金, 语料[:1], 记录目录=记录目录)
     # 金标准内容变了：追加一条有效编号
     金.write_text(金.read_text(encoding="utf-8") + "\n" + json.dumps(
@@ -172,7 +173,7 @@ def test_金标准版本变化后旧记录退出自动复用(tmp_path, monkeypat
 def test_识别规则版本变化后旧记录退出自动复用(tmp_path, monkeypatch):
     金 = _金标准(tmp_path)
     基线 = _基线(tmp_path, monkeypatch, 金, 语料)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     _复用跑(tmp_path, monkeypatch, 金, 语料[:1], 记录目录=记录目录)
     from 核心 import 复用证据
     原 = 复用证据.规则摘要
@@ -187,7 +188,7 @@ def test_识别规则版本变化后旧记录退出自动复用(tmp_path, monkey
 def test_同结构冲突时与基线结果一致(tmp_path, monkeypatch):
     金 = _金标准(tmp_path)
     基线 = _基线(tmp_path, monkeypatch, 金, 语料)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     _复用跑(tmp_path, monkeypatch, 金, 语料[:1], 记录目录=记录目录)
     簿 = 记录簿(记录目录)
     索引 = 簿.快照()
@@ -209,7 +210,7 @@ def test_同结构冲突时与基线结果一致(tmp_path, monkeypatch):
 def test_隐藏辅助公式变化可见值更新仍复用(tmp_path, monkeypatch):
     """区域外／隐藏的辅助格变了、可见值也变了：结构没变就复用，读值用本次文件。"""
     金 = _金标准(tmp_path)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     语料一 = [("一", 科目表, 2025)]
     _复用跑(tmp_path, monkeypatch, 金, 语料一, 记录目录=记录目录)
     # 第二份：同布局，可见数值整体 +50，隐藏辅助格改成别的值
@@ -228,7 +229,7 @@ def test_隐藏辅助公式变化可见值更新仍复用(tmp_path, monkeypatch)
 def test_重新隐藏数据行后不沿用旧坐标(tmp_path, monkeypatch):
     """把数据行藏起来：可见结构变了，回退重认，结果与同一份文件的基线一致。"""
     金 = _金标准(tmp_path)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     _复用跑(tmp_path, monkeypatch, 金, [("一", 科目表, 2025)], 记录目录=记录目录)
     任务 = _跑(tmp_path / "复用二", "二", 科目表[:1], 2026, 记录目录, 金, monkeypatch,
               隐藏行=2, 科目B=科目表[:1])

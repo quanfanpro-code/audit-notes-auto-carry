@@ -10,6 +10,7 @@ from openpyxl.workbook.defined_name import DefinedName
 from 核心.标题 import 生成本次标题, 解析日期, 格式化
 from 核心.识别 import _解析表
 from 核心.流程 import 运行任务
+from 测试.安全目录 import 安全记录目录
 
 标题句 = "截至2024年12月31日，本公司货币资金余额如下"
 
@@ -32,7 +33,8 @@ def _B合集(组, 条目):
 
 
 def _上下文(标题=标题句, 区域="TA_001"):
-    return {"tables": [{"range_name": 区域, "title": 标题}]}
+    return {"tables": [{"range_name": 区域, "title": 标题,
+                        "unit_text_candidates": ["金额单位：人民币元"]}]}
 
 
 def test_期初期末两处分别取本次B日期():
@@ -147,7 +149,8 @@ def _造(tmp_path, 年, 前缀, 金额):
     B = tmp_path / f"{前缀}B.xlsx"
     b.save(B)
     b.close()
-    上下文 = {"tables": [{"range_name": "TA_001", "title": f"截至{年 - 1}年12月31日"}]}
+    上下文 = {"tables": [{"range_name": "TA_001", "title": f"截至{年 - 1}年12月31日",
+                       "unit_text_candidates": ["金额单位：人民币元"]}]}
     return A, B, 上下文
 
 
@@ -234,7 +237,7 @@ def test_无需搬运且不改标题的对照组(tmp_path, monkeypatch):
 def test_复用后的第二份仍按本次B日期更新标题(tmp_path, monkeypatch):
     """标题规则随解释复用，片段用本次标题回填，新文仍由本次 B 日期生成。"""
     monkeypatch.delenv("审计附注_复用", raising=False)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     状态1, 收到1 = _跑(tmp_path, "复一", 2025, 100, monkeypatch, 记录目录=记录目录)
     assert 状态1["步骤"] == "done"
     assert 收到1[0]["text"] == "截至2025年12月31日"
@@ -246,16 +249,35 @@ def test_复用后的第二份仍按本次B日期更新标题(tmp_path, monkeypa
     assert 收到2[0]["text"] == "截至2026年12月31日"        # 新文来自本次 B
 
 
-def test_复用后的第二份仍按本次B日期更新标题(tmp_path, monkeypatch):
-    """标题规则随解释复用，片段用本次标题回填，新文仍由本次 B 日期生成。"""
-    monkeypatch.delenv("审计附注_复用", raising=False)
-    记录目录 = tmp_path / "记录"
-    状态1, 收到1 = _跑(tmp_path, "复一", 2025, 100, monkeypatch, 记录目录=记录目录)
-    assert 状态1["步骤"] == "done"
-    assert 收到1[0]["text"] == "截至2025年12月31日"
-    状态2, 收到2 = _跑(tmp_path, "复二", 2026, 100, monkeypatch, 记录目录=记录目录)
-    assert 状态2["步骤"] == "done"
-    记录 = json.loads((tmp_path / "任务复二" / "复用记录_A.json").read_text(encoding="utf-8"))
-    assert 记录["调用"]["第三遍"] == 0                     # 第三遍整组复用
-    assert 收到2 and 收到2[0]["old_text"] == "截至2025年12月31日"
-    assert 收到2[0]["text"] == "截至2026年12月31日"        # 新文来自本次 B
+def test_只有标题骨架时按本次标题重建规则():
+    """第二遍复用只剩骨架、第三遍重认丢了标题结论：仍要按本次标题生成写回指令。"""
+    from 核心.标题 import 生成本次标题
+
+    A = [{"区域": "TA_001", "科目": "货币资金", "表名": "余额构成", "表组": "G1",
+          "工作表": "sheet1", "行范围": [1, 3], "范围": "A1:D3",
+          "标题规则": {"有标题": True, "骨架": "截至{本期期末}", "角色": ["本期期末"]}}]
+    B = [{"科目": "货币资金", "表名": "余额构成", "表组": "G1",
+          "维度值": {"期间角色": "本期期末", "期间实际": "2026-12-31"}, "格": "word附注!D2"}]
+    上下文 = {"tables": [{"range_name": "TA_001", "title": "截至2025年12月31日",
+                       "unit_text_candidates": ["金额单位：人民币元"]}]}
+    更新, 问题, 撤回, _ = 生成本次标题(A, B, 上下文, {"sheet1!C2": 1}, B)
+    assert not 问题 and not 撤回, (问题, 撤回)
+    assert 更新[0]["old_text"] == "截至2025年12月31日"
+    assert 更新[0]["text"] == "截至2026年12月31日"
+
+
+def test_只有标题骨架时按本次标题重建规则():
+    """第二遍复用只剩骨架、第三遍重认丢了标题结论：仍要按本次标题生成写回指令。"""
+    from 核心.标题 import 生成本次标题
+
+    A = [{"区域": "TA_001", "科目": "货币资金", "表名": "余额构成", "表组": "G1",
+          "工作表": "sheet1", "行范围": [1, 3], "范围": "A1:D3",
+          "标题规则": {"有标题": True, "骨架": "截至{本期期末}", "角色": ["本期期末"]}}]
+    B = [{"科目": "货币资金", "表名": "余额构成", "表组": "G1",
+          "维度值": {"期间角色": "本期期末", "期间实际": "2026-12-31"}, "格": "word附注!D2"}]
+    上下文 = {"tables": [{"range_name": "TA_001", "title": "截至2025年12月31日",
+                       "unit_text_candidates": ["金额单位：人民币元"]}]}
+    更新, 问题, 撤回, _ = 生成本次标题(A, B, 上下文, {"sheet1!C2": 1}, B)
+    assert not 问题 and not 撤回, (问题, 撤回)
+    assert 更新[0]["old_text"] == "截至2025年12月31日"
+    assert 更新[0]["text"] == "截至2026年12月31日"

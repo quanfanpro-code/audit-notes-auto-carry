@@ -1,12 +1,36 @@
 # coding: utf-8
 """复用记录管理：停用、裁决与影响查询；请求幂等、冲突集合与依据校验。"""
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from 核心.共用记录簿 import 记录簿, 发布事件, 使用事件
 from 核心.复用管理 import 停用, 裁决, 查询, 拒绝
+from 核心.复用接入 import 登记使用
+from 测试.安全目录 import 安全记录目录
+
+根 = Path(__file__).resolve().parents[1]
+
+
+def _子进程停用(目录):
+    """另一个真实进程执行停用；返回它的结果字典。"""
+    脚本 = Path(目录) / "子停用.py"
+    脚本.write_text(r'''# coding: utf-8
+import json, sys
+sys.path.insert(0, sys.argv[2])
+from 核心.共用记录簿 import 记录簿
+from 核心.复用管理 import 停用
+r = 停用(记录簿(sys.argv[1]), '子停用', ['V甲'], '原表认错科目', '复核#12')
+print(json.dumps(r, ensure_ascii=False))
+''', encoding="utf-8")
+    出 = subprocess.run([sys.executable, str(脚本), str(目录), str(根)], capture_output=True,
+                       encoding="utf-8",
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    assert 出.returncode == 0, 出.stderr
+    return json.loads(出.stdout.strip().splitlines()[-1])
 
 
 def _发布(簿, 版本, 证据键, 解释键, 任务, 依赖=(), 侧="A", 组="G1"):
@@ -21,7 +45,7 @@ def _用(簿, 版本, 任务, 组="G1"):
 
 
 def _链(tmp_path):
-    簿 = 记录簿(tmp_path / "记录")
+    簿 = 记录簿(安全记录目录())
     _发布(簿, "V甲", "证甲", "解甲", "任务甲")
     _用(簿, "V甲", "任务乙")
     _发布(簿, "V乙", "证乙", "解乙", "任务乙", 依赖=["V甲"])
@@ -67,7 +91,7 @@ def test_源文件已移动或中断的任务仍保留在影响清单(tmp_path):
 
 
 def test_冲突裁决保留合格版本并解除阻止(tmp_path):
-    簿 = 记录簿(tmp_path / "记录")
+    簿 = 记录簿(安全记录目录())
     _发布(簿, "V1", "证同", "解一", "任务甲")
     _发布(簿, "V2", "证同", "解二", "任务乙")
     索引 = 簿.快照()
@@ -84,7 +108,7 @@ def test_冲突裁决保留合格版本并解除阻止(tmp_path):
 
 
 def test_裁决全部停用与非法输入(tmp_path):
-    簿 = 记录簿(tmp_path / "记录")
+    簿 = 记录簿(安全记录目录())
     _发布(簿, "V1", "证同", "解一", "任务甲")
     _发布(簿, "V2", "证同", "解二", "任务乙")
     with pytest.raises(拒绝, match="不在本次冲突集合"):
@@ -106,3 +130,29 @@ def test_按请求标识查询返回当次登记结果(tmp_path):
     # 返回内容不含旧任务原文，只有任务标识与表组
     文 = json.dumps(查, ensure_ascii=False)
     assert "原文" not in 文 and "标题" not in 文
+
+
+
+def test_先停用后登记_拿着旧快照也必须被拒(tmp_path):
+    """先停用后登记：任务启动时的快照已过时，锁内重读后拒绝。"""
+    簿 = 记录簿(安全记录目录())
+    _发布(簿, "V甲", "证甲", "解甲", "任务甲")
+    旧代次 = 簿.快照()["代次"]
+    assert _子进程停用(簿.目录)["状态"] == "已停用"
+
+    另 = 记录簿(簿.目录)                     # 任务仍拿着启动时的旧快照
+    ok, 因 = 登记使用(另, "V甲", "任务乙", "A", "G1", 旧代次)
+    assert ok is False and "停用" in 因
+    assert not [x for x in 另.快照()["使用"] if x.get("版本") == "V甲"]
+
+
+def test_先登记后停用_影响清单必须含这次使用(tmp_path):
+    """先登记后停用：这次使用已经落库，另一进程停用时要能列出来。"""
+    簿 = 记录簿(安全记录目录())
+    _发布(簿, "V甲", "证甲", "解甲", "任务甲")
+    ok, 因 = 登记使用(簿, "V甲", "任务乙", "A", "G1", 簿.快照()["代次"])
+    assert ok, 因
+
+    结果 = _子进程停用(簿.目录)
+    assert "任务乙" in (结果["直接"]["任务"] or [])
+    assert "任务乙" in (结果["待复核"] or [])

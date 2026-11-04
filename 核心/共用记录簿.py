@@ -28,22 +28,37 @@ _批次目录 = "批次"
 _锁名 = "锁"
 _线程锁 = {}
 _线程锁表锁 = threading.Lock()
-_同步目录名 = ("onedrive", "dropbox", "baidusyncdisk", "baidunetdisk", "nutstore",
-          "weiyun", "微云", "坚果云", "sync")
+_同步标记 = ("onedrive", "dropbox", "google drive", "googledrive", "icloud", "sync",
+          "坚果云", "nutstore", "baidunetdisk", "百度网盘", "微云", "weiyun")
+
+
+def 目录是否安全(路径) -> bool:
+    """记录目录不能落在同步盘、项目目录或无法确认的位置：默认与显式指定同一标准。"""
+    if 路径 is None:
+        return False
+    原 = Path(路径)
+    if not 原.is_absolute():
+        return False                       # 相对路径随工作目录漂移，无法确认落在哪里
+    try:
+        文 = str(原.resolve()).lower()
+    except OSError:
+        return False
+    if any(x in 文 for x in _同步标记):
+        return False
+    return not any(x in 文 for x in ("\\documents\\code\\", "\\documents\\codex\\"))
 
 
 def 默认目录():
-    """当前 Windows 用户的本地应用数据目录；落在已知同步目录时返回 None（关闭记录读写）。"""
+    """记录目录：环境变量优先，否则本机应用数据；落在同步/项目目录时返回 None。"""
     指定 = os.environ.get("审计附注_识别记录目录")
     if 指定:
-        return Path(指定)
-    基 = os.environ.get("LOCALAPPDATA")
-    if not 基:
-        return None
-    目录 = Path(基) / "审计附注自动搬运" / "识别记录"
-    if any(名 in str(目录).lower() for 名 in _同步目录名):
-        return None
-    return 目录
+        候选 = Path(指定)
+    else:
+        基 = os.environ.get("LOCALAPPDATA")
+        if not 基:
+            return None
+        候选 = Path(基) / "审计附注自动搬运" / "识别记录"
+    return 候选 if 目录是否安全(候选) else None
 
 
 def 已启用(输入: dict = None) -> bool:
@@ -119,10 +134,21 @@ class 记录簿:
     """一个记录簿目录的读写入口；进程内缓存索引，代次变化时重读。"""
 
     def __init__(self, 目录=None):
-        self.目录 = Path(目录) if 目录 else 默认目录()
+        指定 = 目录 if 目录 else os.environ.get("审计附注_识别记录目录")
+        候选 = Path(目录) if 目录 else 默认目录()
         self._缓存 = None                  # (代次, 索引)
         self._不可用 = ""                  # 缓存失效原因：非空时本次一律不复用
         self.最近原因 = ""
+        if 候选 is not None and not 目录是否安全(候选):
+            self.目录 = None
+            self._不可用 = "记录目录不在允许的位置（同步盘、项目目录或无法确认安全）"
+        elif 候选 is None and 指定:
+            self.目录 = None
+            self._不可用 = "记录目录不在允许的位置（同步盘、项目目录或无法确认安全）"
+        else:
+            self.目录 = 候选
+            if 候选 is None:
+                self._不可用 = "未找到可用的本机记录目录"
 
     # —— 读 ——
     def _清单(self):
@@ -135,6 +161,11 @@ class 记录簿:
 
     def 快照(self):
         """取一次已提交清单并构造索引；任何异常都标记本次不可用。"""
+        if self.目录 is None:
+            self.最近原因 = self._不可用 or "未找到可用的本机记录目录"
+            return {"可用": False, "代次": None, "原因": self.最近原因,
+                    "解释": {}, "按证据": {}, "按步": {}, "冲突": {}, "依赖": {},
+                    "使用": [], "请求": {}, "批次": []}
         try:
             清单 = self._清单()
             代次 = int(清单.get("代次") or 0)
@@ -150,7 +181,9 @@ class 记录簿:
             self._不可用 = f"索引刷新失败：{e}"
             self.最近原因 = self._不可用
             self._缓存 = None
-            return {"可用": False, "代次": None, "原因": self._不可用, "解释": {}, "按证据": {}}
+            return {"可用": False, "代次": None, "原因": self._不可用,
+                    "解释": {}, "按证据": {}, "按步": {}, "冲突": {}, "依赖": {},
+                    "使用": [], "请求": {}, "批次": []}
 
     def _校验批次(self, 清单):
         for 批 in 清单.get("批次") or []:
@@ -217,6 +250,11 @@ class 记录簿:
                 if 版本 in 索引["解释"]:
                     索引["解释"][版本]["状态"] = "停用"
                     索引["解释"][版本]["停用原因"] = 事件.get("原因") or ""
+            # 直接与间接下游同批次失效：停用一版不能只停它自己
+            for 版本 in 事件.get("失效") or []:
+                if 版本 in 索引["解释"] and 索引["解释"][版本]["状态"] == "有效":
+                    索引["解释"][版本]["状态"] = "停用"
+                    索引["解释"][版本]["停用原因"] = "因上游停用：" + (事件.get("原因") or "")
         elif 类型 == "裁决":
             保留 = 事件.get("保留") or []
             for 版本 in 事件.get("停用") or []:
@@ -230,8 +268,12 @@ class 记录簿:
             索引["请求"].setdefault(事件["请求"], {"类型": 类型, "事件": 事件})
 
     # —— 写 ——
-    def 提交(self, 事件们: list, 请求标识: str, 预期代次=None) -> dict:
-        """在跨进程锁内追加一批事件：先落盘核验批次，再一次替换当前清单。"""
+    def 提交(self, 事件们: list, 请求标识: str, 预期代次=None, 校验=None) -> dict:
+        """在跨进程锁内追加一批事件：先落盘核验批次，再一次替换当前清单。
+
+        校验 在锁内、写批次之前调用（拿到的是刚读到的清单），用来拒绝依赖已失效状态
+        的提交；它抛异常即整批不写。这样停用与登记交错时不会两边都成功。
+        """
         if self.目录 is None:
             raise FileNotFoundError("未找到可用的本机记录目录")
         if not 请求标识:
@@ -240,14 +282,14 @@ class 记录簿:
         重试 = 0
         while True:
             try:
-                return self._提交一次(事件们, 请求标识, 预期代次)
+                return self._提交一次(事件们, 请求标识, 预期代次, 校验)
             except _代次不符:
                 重试 += 1
                 if 预期代次 is not None or 重试 > 20:
                     raise RuntimeError("记录簿代次已变化，请重读后重新提交") from None
                 time.sleep(0.01)
 
-    def _提交一次(self, 事件们, 请求标识, 预期代次):
+    def _提交一次(self, 事件们, 请求标识, 预期代次, 校验=None):
         self.目录.mkdir(parents=True, exist_ok=True)
         (self.目录 / _批次目录).mkdir(exist_ok=True)
         with _文件锁(self.目录 / _锁名):
@@ -264,6 +306,8 @@ class 记录簿:
                             return {"代次": 代次, "状态": "已存在", "请求": 请求标识,
                                     "批次": 批.get("编号")}
                         raise ValueError("同一请求标识对应不同内容，拒绝提交")
+            if 校验 is not None:
+                校验(清单)                 # 锁内重读后的状态，不是任务开始时那份快照
             编号 = f"b{代次 + 1:08d}"
             数据 = {"代次": 代次 + 1, "请求": 请求标识, "事件": 事件们}
             内容 = json.dumps(数据, ensure_ascii=False, sort_keys=True,
@@ -282,6 +326,11 @@ class 记录簿:
 
     def 刷新(self):
         """发布或外部提交后同步刷新索引；失败即标记不可用，不沿用旧索引。"""
+        if self.目录 is None:
+            self.最近原因 = self._不可用 or "未找到可用的本机记录目录"
+            return {"可用": False, "代次": None, "原因": self.最近原因,
+                    "解释": {}, "按证据": {}, "按步": {}, "冲突": {}, "依赖": {},
+                    "使用": [], "请求": {}, "批次": []}
         try:
             清单 = self._清单()
             索引 = self._建索引(清单)
@@ -293,11 +342,17 @@ class 记录簿:
             self._不可用 = f"索引刷新失败：{e}"
             self.最近原因 = self._不可用
             self._缓存 = None
-            return {"可用": False, "代次": None, "原因": self._不可用, "解释": {}, "按证据": {}}
+            return {"可用": False, "代次": None, "原因": self._不可用,
+                    "解释": {}, "按证据": {}, "按步": {}, "冲突": {}, "依赖": {},
+                    "使用": [], "请求": {}, "批次": []}
 
     # —— 供内部管理与流程使用 ——
     def 可用(self) -> bool:
         return bool(self.快照().get("可用"))
+
+    def 读索引(self, 清单) -> dict:
+        """按给定清单构造索引（供锁内校验使用，不读盘、不改缓存）。"""
+        return self._建索引(清单)
 
     def 解释们(self) -> dict:
         return (self.快照().get("解释") or {})

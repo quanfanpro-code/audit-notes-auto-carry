@@ -14,6 +14,7 @@ from openpyxl.workbook.defined_name import DefinedName
 from 核心.流程 import 运行任务
 from 核心.共用记录簿 import 记录簿, 发布事件
 from 核心.复用证据 import 证据键, 解释键, 版本号
+from 测试.安全目录 import 安全记录目录
 
 科目表 = [("货币资金", "余额构成"), ("应收账款", "按账龄披露"), ("存货", "存货明细")]
 
@@ -53,6 +54,8 @@ def _造(tmp_path, 名, 科目们, 年):
         区域 = f"TA_{i:03d}"
         wa.defined_names.add(DefinedName(区域, attr_text=f"'sheet1'!$A${顶}:$D${顶 + 2}"))
         表们.append({"range_name": 区域, "title": f"{科}（附注）", "sheet": "sheet1",
+                   "unit_text_candidates": ["金额单位：人民币元"],
+                   "chapter_context": [f"{科}（附注）", "金额单位：人民币元"],
                    "first_row": 顶, "first_column": 1, "row_count": 3, "column_count": 4})
         顶 += 3
     A = tmp_path / f"A_{名}.xlsx"
@@ -62,8 +65,8 @@ def _造(tmp_path, 名, 科目们, 年):
     return A, {"tables": 表们}, B
 
 
-def _模型(年, 侧科目):
-    """固定答复；按调用目录前缀区分 A／B。返回（函数, 记录）。"""
+def _模型(年, 侧科目, 漏行科目=None):
+    """固定答复；按调用目录前缀区分 A／B。漏行科目 指定时，该组精读故意漏掉一行。"""
     记录 = []
 
     def 调用(配置, 指令, 材料, 目录):
@@ -90,17 +93,21 @@ def _模型(年, 侧科目):
                   {"列": "C", "路径": "期末余额", "角色": "数据列", "期间角色": "本期期末",
                    "期间实际": {"值": f"{年}-12-31", "位置": f"C{顶}"}},
                   {"列": "D", "路径": "单位说明", "角色": "说明列", "期间角色": None}],
-            "行": [{"行": 顶, "名字": "项目", "角色": "表头"},
-                  {"行": 顶 + 1, "名字": "甲公司", "角色": "数据", "序号": 1,
-                   "槽位": {"B": 编号, "C": 编号}},
-                  {"行": 顶 + 2, "名字": "乙公司", "角色": "数据", "序号": 2,
-                   "槽位": {"B": 编号, "C": 编号}}],
+            "行": ([{"行": 顶, "名字": "项目", "角色": "表头"},
+                   {"行": 顶 + 1, "名字": "甲公司", "角色": "数据", "序号": 1,
+                    "槽位": {"B": 编号, "C": 编号}}]
+                  if 科目 == 漏行科目 else
+                  [{"行": 顶, "名字": "项目", "角色": "表头"},
+                   {"行": 顶 + 1, "名字": "甲公司", "角色": "数据", "序号": 1,
+                    "槽位": {"B": 编号, "C": 编号}},
+                   {"行": 顶 + 2, "名字": "乙公司", "角色": "数据", "序号": 2,
+                    "槽位": {"B": 编号, "C": 编号}}]),
             "作用范围": {"币种": "人民币", "单位": "元", "期间跨度": "时点"},
             "空名单": [], "例外": []}, ensure_ascii=False)
     return 调用, 记录
 
 
-def _跑(tmp_path, 名, 科目A, 科目B, 年, 记录目录, 金, monkeypatch):
+def _跑(tmp_path, 名, 科目A, 科目B, 年, 记录目录, 金, monkeypatch, 漏行科目=None):
     A, 上下文, B = _造(tmp_path, f"{名}A", 科目A, 年)
     _, _, B = _造(tmp_path, f"{名}B", 科目B, 年)
 
@@ -120,7 +127,7 @@ def _跑(tmp_path, 名, 科目A, 科目B, 年, 记录目录, 金, monkeypatch):
     monkeypatch.setattr("核心.提取.调用桥接提取", 假提取)
     monkeypatch.setattr("核心.写回.调用桥接更新", 假更新)
     monkeypatch.setattr("核心.回读.调用桥接提取", 假回读)
-    模型, 记录 = _模型(年, {"A": 科目A, "B": 科目B})
+    模型, 记录 = _模型(年, {"A": 科目A, "B": 科目B}, 漏行科目=漏行科目)
     monkeypatch.setattr("核心.识别.调用识别", 模型)
     任务 = tmp_path / f"任务_{名}"
     状态 = 运行任务({"word": "原件.docx", "b表": str(B), "金标准": str(金),
@@ -145,7 +152,7 @@ def _开复用(monkeypatch):
 def test_连续三份同一布局后两份全复用(tmp_path, monkeypatch):
     _开复用(monkeypatch)
     金 = _金标准(tmp_path)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     任务1, 记1 = _跑(tmp_path, "一", 科目表, 科目表, 2025, 记录目录, 金, monkeypatch)
     assert _调用(任务1, "A") == {"第一遍": 1, "第二遍": 1, "第三遍": 3, "重试": 0}
     assert _调用(任务1, "B") == {"第一遍": 1, "第二遍": 1, "第三遍": 3, "重试": 0}
@@ -173,7 +180,7 @@ def test_连续三份同一布局后两份全复用(tmp_path, monkeypatch):
 def test_首份B因A缺科目跳过第二份补认一组(tmp_path, monkeypatch):
     _开复用(monkeypatch)
     金 = _金标准(tmp_path)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     任务1, _ = _跑(tmp_path, "缺", 科目表[:2], 科目表, 2025, 记录目录, 金, monkeypatch)
     assert _调用(任务1, "B")["第三遍"] == 2                # 存货组被粗比跳过
     结构 = [json.loads(x) for x in (任务1 / "结构清单.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -189,7 +196,7 @@ def test_首份B因A缺科目跳过第二份补认一组(tmp_path, monkeypatch):
 def test_A删除中间科目后面的表移位仍复用(tmp_path, monkeypatch):
     _开复用(monkeypatch)
     金 = _金标准(tmp_path)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     任务1, _ = _跑(tmp_path, "全", 科目表, 科目表, 2025, 记录目录, 金, monkeypatch)
     assert _调用(任务1, "A")["第三遍"] == 3
     任务2, 记2 = _跑(tmp_path, "少", [科目表[0], 科目表[2]], 科目表, 2026,
@@ -208,7 +215,7 @@ def test_A删除中间科目后面的表移位仍复用(tmp_path, monkeypatch):
 def test_同一结构两种解释不自动选用(tmp_path, monkeypatch):
     _开复用(monkeypatch)
     金 = _金标准(tmp_path)
-    记录目录 = tmp_path / "记录"
+    记录目录 = 安全记录目录()
     _跑(tmp_path, "起", 科目表, 科目表, 2025, 记录目录, 金, monkeypatch)
     索引 = 记录簿(记录目录).快照()
     项0 = next(x for x in 索引["解释"].values() if x["侧"] == "A" and x["步骤"] == "第三遍")
@@ -225,3 +232,34 @@ def test_同一结构两种解释不自动选用(tmp_path, monkeypatch):
     assert (a["第一遍"], a["第二遍"]) == (0, 0)
     assert a["第三遍"] >= 1 and len([x for x in 记2 if x.startswith("A:")]) >= 1
     assert any("冲突" in (x.get("原因") or "") for x in _复用记录(任务2, "A")["回退"])
+
+
+def test_漏行组不作为来源且旁边合格组仍复用(tmp_path, monkeypatch):
+    """第一份某组精读漏行：该组不发布；第二份该组重认，另一组照常复用。"""
+    _开复用(monkeypatch)
+    金 = _金标准(tmp_path)
+    记录目录 = 安全记录目录()
+    科目 = [("货币资金", "余额构成"), ("存货", "存货明细")]
+    任务1, _ = _跑(tmp_path, "漏", 科目, 科目, 2025, 记录目录, 金, monkeypatch,
+                 漏行科目="货币资金")
+    记录1 = _复用记录(任务1, "A")
+    发布 = {x["表组"]: x for x in 记录1["发布"] if x["步骤"] == "第三遍"}
+    坏键, 好键 = "G1", "G2"                  # 货币资金、存货，按科目表顺序
+    坏 = 发布[坏键]
+    assert 坏["状态"] == "未发布" and "行没有归入" in 坏["原因"]
+
+    任务2, _ = _跑(tmp_path, "补", 科目, 科目, 2026, 记录目录, 金, monkeypatch,
+                 漏行科目="货币资金")
+    记录2 = _复用记录(任务2, "A")
+    组级复用 = [x for x in 记录2["复用"] if x["步骤"] == "第三遍"]
+    assert len(组级复用) == 1, 记录2["复用"]           # 只有合格组复用了
+    assert len(记录2["首认"]) == 1, 记录2["首认"]       # 坏组按“没有同结构”重认
+    assert "没有同结构" in 记录2["首认"][0]["说明"]
+    assert 记录2["调用"]["第三遍"] == 1                  # 只重认了坏组
+    结构2 = [json.loads(x) for x in
+           (任务2 / "结构清单.jsonl").read_text(encoding="utf-8").splitlines()]
+    a结构 = [x for x in 结构2 if x["侧"] == "A"]
+    assert [bool(x.get("复用版本")) for x in a结构] == [False, True]
+    assert [x["科目"] for x in a结构] == ["货币资金", "存货"]
+
+

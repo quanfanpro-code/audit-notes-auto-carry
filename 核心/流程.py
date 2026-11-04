@@ -176,12 +176,9 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     if 已启用(输入):
         try:
             簿 = 取记录簿(输入.get("识别记录目录"))
-            if 簿.目录 is None:
-                簿, 复used = None, {"可用": False, "原因": "未找到可用的本机记录目录"}
-            else:
-                快照 = 簿.刷新()
-                复used = {"可用": bool(快照.get("可用")), "代次": 快照.get("代次"),
-                         "原因": 快照.get("原因") or ""}
+            快照 = 簿.刷新()
+            复used = {"可用": bool(快照.get("可用")), "代次": 快照.get("代次"),
+                     "原因": 快照.get("原因") or ""}
         except Exception as e:
             簿, 复used = None, {"可用": False, "原因": f"记录簿不可用：{e}"}
     索引["复用"] = 复used

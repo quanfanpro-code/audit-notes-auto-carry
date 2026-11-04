@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from 核心.共用记录簿 import 记录簿, 使用事件, 发布事件, 默认目录, 已启用
+from 测试.安全目录 import 安全记录目录
 
 根 = Path(__file__).resolve().parent.parent
 
@@ -42,7 +43,7 @@ def _跑(脚本, 目录, 标识, 次数):
 
 
 def test_两个进程交错提交不丢批次(tmp_path):
-    目录 = tmp_path / "记录"
+    目录 = 安全记录目录()
     脚本 = _脚本(tmp_path)
     甲 = _跑(脚本, 目录, "甲", 5)
     乙 = _跑(脚本, 目录, "乙", 5)
@@ -58,7 +59,7 @@ def test_两个进程交错提交不丢批次(tmp_path):
 
 
 def test_批次落盘但清单未替换时读者看不到(tmp_path):
-    目录 = tmp_path / "记录"
+    目录 = 安全记录目录()
     簿 = 记录簿(目录)
     簿.提交([_事件("甲")], "请求-甲")
     assert 簿.快照()["代次"] == 1
@@ -76,7 +77,7 @@ def test_批次落盘但清单未替换时读者看不到(tmp_path):
 
 
 def test_持锁进程异常退出后锁可再取得(tmp_path):
-    目录 = tmp_path / "记录"
+    目录 = 安全记录目录()
     簿 = 记录簿(目录)
     簿.提交([_事件("甲")], "请求-甲")
     脚本 = tmp_path / "占锁.py"
@@ -97,7 +98,7 @@ def test_持锁进程异常退出后锁可再取得(tmp_path):
 
 
 def test_同一请求重试幂等且内容变了拒绝(tmp_path):
-    簿 = 记录簿(tmp_path / "记录")
+    簿 = 记录簿(安全记录目录())
     一 = 簿.提交([_事件("甲")], "同一请求")
     二 = 簿.提交([_事件("甲")], "同一请求")
     assert 一["状态"] == "已提交" and 二["状态"] == "已存在"
@@ -107,7 +108,7 @@ def test_同一请求重试幂等且内容变了拒绝(tmp_path):
 
 
 def test_缺批次与刷新失败都不沿用旧索引(tmp_path):
-    目录 = tmp_path / "记录"
+    目录 = 安全记录目录()
     簿 = 记录簿(目录)
     簿.提交([_事件("甲")], "请求-甲")
     簿.提交([_事件("乙")], "请求-乙")
@@ -123,7 +124,7 @@ def test_缺批次与刷新失败都不沿用旧索引(tmp_path):
 
 def test_批次被截断后整库不可用(tmp_path):
     """批次文件被截短、大小与清单不符：不能把半份记录当完整记录用。"""
-    目录 = tmp_path / "记录"
+    目录 = 安全记录目录()
     记录簿(目录).提交([_事件("截", 1)], "截断前")
     批 = next((目录 / "批次").glob("*.json"))
     原文 = 批.read_text(encoding="utf-8")
@@ -134,7 +135,7 @@ def test_批次被截断后整库不可用(tmp_path):
 
 
 def test_清单损坏时整库不可用(tmp_path):
-    目录 = tmp_path / "记录"
+    目录 = 安全记录目录()
     记录簿(目录).提交([_事件("甲")], "请求-甲")
     (目录 / "当前.json").write_text("{不是JSON", encoding="utf-8")
     索引 = 记录簿(目录).快照()
@@ -142,7 +143,7 @@ def test_清单损坏时整库不可用(tmp_path):
 
 
 def test_停用事件跨进程可见(tmp_path):
-    目录 = tmp_path / "记录"
+    目录 = 安全记录目录()
     一 = 记录簿(目录)
     一.提交([发布事件("A", "第三遍", {"证据版本": 1}, {"科目": "货币资金"},
                     "证据甲", "解释甲", "V甲", "金", "规", {"任务": "T1"})], "发布甲")
@@ -161,12 +162,32 @@ def test_停用事件跨进程可见(tmp_path):
     assert 索引["解释"]["V甲"]["状态"] == "停用"
 
 
-def test_默认目录避开同步目录(tmp_path, monkeypatch):
+def test_默认目录避开同步目录(monkeypatch):
     monkeypatch.delenv("审计附注_识别记录目录", raising=False)
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    基 = 安全记录目录().parent                 # 系统临时目录：非项目、非同步
+    monkeypatch.setenv("LOCALAPPDATA", str(基 / "Local"))
     目录 = 默认目录()
     assert 目录 and "识别记录" in str(目录)
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "OneDrive" / "Local"))
+    monkeypatch.setenv("LOCALAPPDATA", str(基 / "OneDrive" / "Local"))
+    assert 默认目录() is None
+
+
+def test_显式指定的项目目录与同步目录都被拒(monkeypatch):
+    """报告第 10 项：显式指定也要过同一套检查，不能绕过。"""
+    monkeypatch.setenv("审计附注_识别记录目录", str(Path.cwd() / "运行" / "记录"))
+    assert 默认目录() is None
+    簿 = 记录簿(None)
+    assert 簿.目录 is None
+    快照 = 簿.快照()
+    assert 快照["可用"] is False and "允许的位置" in 快照["原因"]
+
+    monkeypatch.setenv("审计附注_识别记录目录",
+                       str(安全记录目录().parent / "OneDrive" / "记录"))
+    assert 默认目录() is None
+
+
+def test_相对目录无法确认安全也拒绝(monkeypatch):
+    monkeypatch.setenv("审计附注_识别记录目录", "运行/相对记录")
     assert 默认目录() is None
 
 

@@ -85,8 +85,24 @@ def 生成本次标题(A结构, B结构, 上下文, 变更, B合集):
     for 组 in sorted(待搬):
         记录们 = a按组.get(组) or []
         规则 = next((x.get("标题") for x in 记录们 if isinstance(x.get("标题"), dict)), None)
+        区域 = next((str(x.get("区域") or "") for x in 记录们 if x.get("区域")), "")
         if not 规则:
-            continue
+            # 第二遍复用时只留下骨架：第三遍重认后据此按本次标题重新取片段
+            from .复用证据 import 按骨架取片段
+
+            骨架 = next((x.get("标题规则") for x in 记录们
+                        if isinstance(x.get("标题规则"), dict) and x["标题规则"].get("有标题")), None)
+            if not 骨架:
+                continue
+            当前文 = 本次标题(上下文, 区域)
+            片段对 = 按骨架取片段(骨架.get("骨架") or "", 当前文)
+            if not 片段对:
+                撤回.add(组)
+                问题.append({"原因": "标题规则在本次对不上，该组标题与数值保持原样",
+                            "科目": 组[0], "表名": 组[1]})
+                continue
+            规则 = {"原文": 当前文,
+                    "日期": [{"片段": 片段, "期间角色": 角色} for 角色, 片段 in 片段对]}
         原文 = str(规则.get("原文") or "").strip()
         片段们 = 规则.get("日期") or []
         候选 = b格.get(组) or []
@@ -97,6 +113,7 @@ def 生成本次标题(A结构, B结构, 上下文, 变更, B合集):
             continue
         新文, 失败 = 原文, ""
         证据组 = []
+        件段 = []
         for 项 in 片段们:
             角色 = str(项.get("期间角色") or "")
             片段 = str(项.get("片段") or "")
@@ -116,12 +133,23 @@ def 生成本次标题(A结构, B结构, 上下文, 变更, B合集):
             if not 新片段:
                 失败 = f"无法按原写法替换日期片段：{片段}"
                 break
-            if 片段 not in 新文:
-                失败 = f"标题原文里找不到日期片段：{片段}"
-                break
-            新文 = 新文.replace(片段, 新片段, 1)
+            件段.append((片段, 新片段))
             证据组.append({"期间角色": 角色, "片段": 片段, "新片段": 新片段,
                         "日期": str(日期值), "坐标": sorted({r.get("格") for r in 同角色})})
+        if not 失败:
+            # 按各片段在原文中的位置一次组装：顺序替换会让第二次命中刚写入的值
+            件, 位 = [], 0
+            for 片段, 新片段 in 件段:
+                起 = 原文.find(片段, 位)
+                if 起 < 0:
+                    失败 = f"标题原文里找不到日期片段：{片段}"
+                    break
+                件.append(原文[位:起])
+                件.append(新片段)
+                位 = 起 + len(片段)
+            if not 失败:
+                件.append(原文[位:])
+                新文 = "".join(件)
         if 失败:
             撤回.add(组)
             问题.append({"原因": "标题未能按本次 B 日期生成，该组标题与数值保持原样",
@@ -129,7 +157,6 @@ def 生成本次标题(A结构, B结构, 上下文, 变更, B合集):
             continue
         if 新文 == 原文:
             continue                         # 日期没变，不需要动标题
-        区域 = next((str(x.get("区域") or "") for x in 记录们 if x.get("区域")), "")
         现标题 = 本次标题(上下文, 区域)
         if not 区域:
             撤回.add(组)

@@ -267,10 +267,11 @@ def _可见记录(sheet, 打印, cells, 列隐藏):
     else:
         来源 = "可见内容"
         内容 = [(c["row"], c["column"]) for c in cells.values()
-                if c.get("formula") or _有内容(c.get("value"))]
-        行号们 = sorted({r for r, _ in 内容 if 行可见(r)})
-        列号们 = sorted({c for _, c in 内容 if 列可见(c)})
-        if 行号们 and 列号们:
+                if (c.get("formula") or _有内容(c.get("value")))
+                and 行可见(c["row"]) and 列可见(c["column"])]
+        if 内容:
+            行号们 = sorted({r for r, _ in 内容})
+            列号们 = sorted({c for _, c in 内容})
             矩形 = [[列号们[0], 行号们[0], 列号们[-1], 行号们[-1]]]
             段们 = []
             for 列 in 列号们:
