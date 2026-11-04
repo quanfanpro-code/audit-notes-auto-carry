@@ -8,6 +8,26 @@ from openpyxl import load_workbook
 from .桥接 import 提取 as 调用桥接提取
 
 
+def _小数位(值) -> int:
+    if isinstance(值, int) and not isinstance(值, bool):
+        return 0
+    文 = repr(float(值))
+    if "e" in 文 or "E" in 文:
+        return 15
+    return len(文.split(".")[1]) if "." in 文 else 0
+
+
+def _按显示精度一致(期望, 实际) -> bool:
+    """Word 单元格按自己的格式显示，回读只能比到它显示出来的精度。"""
+    try:
+        甲, 乙 = float(期望), float(实际)
+    except (TypeError, ValueError):
+        return False
+    if 甲 == 乙:
+        return True
+    return abs(甲 - 乙) <= 0.5 * 10 ** (-_小数位(实际)) + 1e-9
+
+
 def 回读验证(word输出, 变更清单: dict, 临时目录) -> list:
     临时目录 = Path(临时目录)
     临时目录.mkdir(parents=True, exist_ok=True)
@@ -23,7 +43,7 @@ def 回读验证(word输出, 变更清单: dict, 临时目录) -> list:
             实际 = wb[表名][坐标].value if 表名 in wb.sheetnames else None
             期望文 = "" if 期望 in (None, "") else str(期望)
             实际文 = "" if 实际 in (None, "") else str(实际)
-            if 期望文 != 实际文:
+            if 期望文 != 实际文 and not _按显示精度一致(期望, 实际):
                 差异.append({"格": 格, "期望": 期望, "实际": 实际})
     finally:
         wb.close()
