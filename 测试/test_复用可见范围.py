@@ -6,6 +6,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
+from openpyxl.workbook.defined_name import DefinedName
 
 from 核心.表格 import 读快照, 取可见集
 from 核心.识别 import 全文文字, 铺格子, 补原值, _完整性
@@ -153,6 +154,7 @@ def test_无打印区域只取可见内容并保留公式位置(tmp_path):
     ws["Z30"].font = Font(name="宋体")     # 纯格式不扩大范围
     ws.merge_cells("E10:F11")             # 孤立空白合并
     ws.merge_cells("A2:A3")               # 表内合并属结构证据
+    wb.defined_names.add(DefinedName("本表", attr_text="'word附注'!$A$1:$C$5"))
     p = tmp_path / "无打印区域.xlsx"
     wb.save(p)
     wb.close()

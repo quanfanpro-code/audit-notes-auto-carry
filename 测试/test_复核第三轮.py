@@ -5,6 +5,7 @@
 第 1 项走真实 XLSX 与真实三遍解析；第 2、3 项走解析→铺格→配对→搬运；
 第 4 项用两份真实保存的 XLSX。
 """
+from 测试.单位样本 import 单位作用
 import json
 import pathlib
 import sys
@@ -38,7 +39,7 @@ def _金标准(tmp_path, 编号们=(编号,)):
 
 
 def _答(列们, 行们, 空名单=None, 例外=None):
-    return json.dumps({"列": 列们, "行": 行们, "作用范围": {}, "空名单": 空名单 or [],
+    return json.dumps({"列": 列们, "行": 行们, "作用范围": 单位作用("B1", "项目（单位：人民币元）", [c["列"] for c in 列们 if c["角色"] == "数据列"]), "空名单": 空名单 or [],
                        "例外": 例外 or []}, ensure_ascii=False)
 
 
@@ -66,7 +67,7 @@ def _两列名单(不搬项=None):
 
 def _横向表(path, 列名们):
     wb = Workbook(); ws = wb.active; ws.title = "s1"
-    ws["B1"] = "项目"
+    ws["B1"] = "项目（单位：人民币元）"
     for 字母, 名 in zip("CDE", 列名们):
         ws[f"{字母}1"] = 名
     ws["B2"] = "期末余额"

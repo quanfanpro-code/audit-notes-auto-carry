@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from 核心.共用记录簿 import 记录簿, 使用事件, 发布事件, 默认目录, 已启用
+from 核心.共用记录簿 import (记录簿, 使用事件, 发布事件, 默认目录, 项目根,
+                          目录是否安全, 已启用)
 from 测试.安全目录 import 安全记录目录
 
 根 = Path(__file__).resolve().parent.parent
@@ -162,33 +163,26 @@ def test_停用事件跨进程可见(tmp_path):
     assert 索引["解释"]["V甲"]["状态"] == "停用"
 
 
-def test_默认目录避开同步目录(monkeypatch):
+def test_默认目录在项目下(monkeypatch):
+    """记录是项目资产：默认放项目根的 识别记录，随项目备份和迁移。"""
     monkeypatch.delenv("审计附注_识别记录目录", raising=False)
-    基 = 安全记录目录().parent                 # 系统临时目录：非项目、非同步
-    monkeypatch.setenv("LOCALAPPDATA", str(基 / "Local"))
     目录 = 默认目录()
-    assert 目录 and "识别记录" in str(目录)
-    monkeypatch.setenv("LOCALAPPDATA", str(基 / "OneDrive" / "Local"))
-    assert 默认目录() is None
+    assert 目录 == 项目根() / "识别记录"
+    assert 目录是否安全(目录)
 
 
-def test_显式指定的项目目录与同步目录都被拒(monkeypatch):
-    """报告第 10 项：显式指定也要过同一套检查，不能绕过。"""
-    monkeypatch.setenv("审计附注_识别记录目录", str(Path.cwd() / "运行" / "记录"))
-    assert 默认目录() is None
-    簿 = 记录簿(None)
-    assert 簿.目录 is None
-    快照 = 簿.快照()
-    assert 快照["可用"] is False and "允许的位置" in 快照["原因"]
-
+def test_同步目录与相对目录仍被拒(monkeypatch):
+    """只拒同步盘和无法确认的相对路径；项目目录本身允许。"""
     monkeypatch.setenv("审计附注_识别记录目录",
                        str(安全记录目录().parent / "OneDrive" / "记录"))
     assert 默认目录() is None
 
-
-def test_相对目录无法确认安全也拒绝(monkeypatch):
     monkeypatch.setenv("审计附注_识别记录目录", "运行/相对记录")
     assert 默认目录() is None
+
+    monkeypatch.setenv("审计附注_识别记录目录", str(Path.cwd() / "运行" / "记录"))
+    簿 = 记录簿(None)
+    assert 簿.目录 == Path.cwd() / "运行" / "记录"
 
 
 def test_复用开关与关闭后仍可完整识别(tmp_path, monkeypatch):

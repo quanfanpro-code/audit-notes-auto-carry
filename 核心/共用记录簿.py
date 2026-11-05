@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import ctypes
 import json
 import os
 import threading
@@ -33,31 +34,38 @@ _同步标记 = ("onedrive", "dropbox", "google drive", "googledrive", "icloud",
 
 
 def 目录是否安全(路径) -> bool:
-    """记录目录不能落在同步盘、项目目录或无法确认的位置：默认与显式指定同一标准。"""
+    """记录目录必须是绝对路径、不落在同步盘；无法确认就拒绝。"""
     if 路径 is None:
         return False
     原 = Path(路径)
     if not 原.is_absolute():
         return False                       # 相对路径随工作目录漂移，无法确认落在哪里
     try:
-        文 = str(原.resolve()).lower()
-    except OSError:
+        实际 = 原.resolve()
+        文 = str(实际).lower()
+        if 原.drive.startswith("\\") or 实际.drive.startswith("\\"):
+            return False
+        # Windows 原生盘类型：只接受本地可写盘，映射网络盘不能绕过。
+        类型 = ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(实际.anchor))
+        if 类型 not in (2, 3, 6):
+            return False
+    except (OSError, ValueError):
         return False
-    if any(x in 文 for x in _同步标记):
-        return False
-    return not any(x in 文 for x in ("\\documents\\code\\", "\\documents\\codex\\"))
+    return not any(x in 文 for x in _同步标记)
+
+
+def 项目根() -> Path:
+    """源码运行时的项目根：核心/ 的上一级。"""
+    return Path(__file__).resolve().parents[1]
 
 
 def 默认目录():
-    """记录目录：环境变量优先，否则本机应用数据；落在同步/项目目录时返回 None。"""
+    """记录目录：环境变量优先，否则项目根下 识别记录；同步盘与相对路径仍拒。
+
+    shortcut: 打包成单文件运行时 __file__ 在临时解包目录，需显式指定目录。
+    """
     指定 = os.environ.get("审计附注_识别记录目录")
-    if 指定:
-        候选 = Path(指定)
-    else:
-        基 = os.environ.get("LOCALAPPDATA")
-        if not 基:
-            return None
-        候选 = Path(基) / "审计附注自动搬运" / "识别记录"
+    候选 = Path(指定) if 指定 else 项目根() / "识别记录"
     return 候选 if 目录是否安全(候选) else None
 
 
@@ -123,7 +131,20 @@ def _写文件并落盘(路径: Path, 内容: bytes) -> None:
         f.write(内容)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(临时, 路径)
+    # 锁内只重试同一份内容；若替换已成功但调用报错，核对落盘结果。
+    for 次 in range(6):
+        try:
+            os.replace(临时, 路径)
+            return
+        except PermissionError:
+            try:
+                if 路径.read_bytes() == 内容:
+                    return
+            except OSError:
+                pass
+            if 次 == 5:
+                raise
+            time.sleep(0.05 * (次 + 1))
 
 
 def _读json(路径: Path):
@@ -141,10 +162,10 @@ class 记录簿:
         self.最近原因 = ""
         if 候选 is not None and not 目录是否安全(候选):
             self.目录 = None
-            self._不可用 = "记录目录不在允许的位置（同步盘、项目目录或无法确认安全）"
+            self._不可用 = "记录目录不在允许的位置（同步盘、网络位置或无法确认位置）"
         elif 候选 is None and 指定:
             self.目录 = None
-            self._不可用 = "记录目录不在允许的位置（同步盘、项目目录或无法确认安全）"
+            self._不可用 = "记录目录不在允许的位置（同步盘、网络位置或无法确认位置）"
         else:
             self.目录 = 候选
             if 候选 is None:
@@ -234,7 +255,7 @@ class 记录簿:
                 if 来源 and 来源 not in 项["来源"]:
                     项["来源"].append(来源)
             if 事件.get("依赖"):
-                索引["依赖"][版本] = list(dict.fromkeys(事件["依赖"]))
+                索引["依赖"][版本] = list(dict.fromkeys((索引["依赖"].get(版本) or []) + 事件["依赖"]))
             索引["按证据"].setdefault(事件.get("证据键"), [])
             if 版本 not in 索引["按证据"][事件.get("证据键")]:
                 索引["按证据"][事件.get("证据键")].append(版本)
@@ -256,8 +277,8 @@ class 记录簿:
                     索引["解释"][版本]["状态"] = "停用"
                     索引["解释"][版本]["停用原因"] = "因上游停用：" + (事件.get("原因") or "")
         elif 类型 == "裁决":
-            保留 = 事件.get("保留") or []
-            for 版本 in 事件.get("停用") or []:
+            保留 = [事件["保留"]] if 事件.get("保留") else []
+            for 版本 in set(事件.get("停用") or []) | set(事件.get("失效") or []):
                 if 版本 in 索引["解释"]:
                     索引["解释"][版本]["状态"] = "停用"
                     索引["解释"][版本]["停用原因"] = 事件.get("原因") or ""
@@ -297,6 +318,8 @@ class 记录簿:
             代次 = int(清单.get("代次") or 0)
             if 预期代次 is not None and int(预期代次) != 代次:
                 raise _代次不符()
+            if 校验 is not None:
+                校验(清单)  # 管理操作在同一锁内生成结果，重试也在锁内核对原请求。
             for 批 in 清单.get("批次") or []:
                 文件 = self.目录 / _批次目录 / f"{批.get('编号')}.json"
                 if 文件.is_file():
@@ -306,8 +329,6 @@ class 记录簿:
                             return {"代次": 代次, "状态": "已存在", "请求": 请求标识,
                                     "批次": 批.get("编号")}
                         raise ValueError("同一请求标识对应不同内容，拒绝提交")
-            if 校验 is not None:
-                校验(清单)                 # 锁内重读后的状态，不是任务开始时那份快照
             编号 = f"b{代次 + 1:08d}"
             数据 = {"代次": 代次 + 1, "请求": 请求标识, "事件": 事件们}
             内容 = json.dumps(数据, ensure_ascii=False, sort_keys=True,

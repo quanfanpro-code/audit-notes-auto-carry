@@ -231,7 +231,7 @@ def _有内容(值):
     return True
 
 
-def _可见记录(sheet, 打印, cells, 列隐藏):
+def _可见记录(sheet, 打印, cells, 列隐藏, 业务范围=None):
     """按需求第五节的规则确定可见坐标集合：打印区域并集去重、扣隐藏行列；无打印区域取可见内容。"""
     if sheet.sheet_state != "visible":
         return {"来源": "隐藏工作表", "矩形": [], "行": {},
@@ -270,19 +270,33 @@ def _可见记录(sheet, 打印, cells, 列隐藏):
                 if (c.get("formula") or _有内容(c.get("value")))
                 and 行可见(c["row"]) and 列可见(c["column"])]
         if 内容:
-            行号们 = sorted({r for r, _ in 内容})
-            列号们 = sorted({c for _, c in 内容})
-            矩形 = [[列号们[0], 行号们[0], 列号们[-1], 行号们[-1]]]
-            段们 = []
-            for 列 in 列号们:
-                if 段们 and 列 == 段们[-1][1] + 1:
-                    段们[-1][1] = 列
-                else:
-                    段们.append([列, 列])
-            行段 = {r: [list(x) for x in 段们] for r in 行号们}
-            格数 = len(行号们) * len(列号们)
-            if 格数 > 500000:
-                raise WorkbookError("工作表的可见内容范围超过50万格，请核实是否有无用格式或远距离零星内容")
+            # 可见内容先逐格纳入。只有已定义的表区及有内容的合并才扩展内部空白。
+            for r, c in 内容:
+                行段.setdefault(r, []).append([c, c])
+            区域 = [范围 for d in _definitions(sheet.parent) for 名, 范围 in _destinations(d)
+                    if 名 == sheet.title]
+            区域 += [t.ref for t in sheet.tables.values()]
+            区域 += [x["range"] for x in 业务范围 or [] if x.get("sheet") == sheet.title]
+            区域 += [str(m) for m in sheet.merged_cells.ranges
+                    if (m.min_row, m.min_col) in set(内容)]
+            for 范围 in 区域:
+                try:
+                    左, 顶, 右, 底 = range_boundaries(范围)
+                except (ValueError, TypeError):
+                    continue
+                if not all(isinstance(v, int) for v in (左, 顶, 右, 底)):
+                    continue
+                if not any(顶 <= r <= 底 and 左 <= c <= 右 for r, c in 内容):
+                    continue
+                if (右 - 左 + 1) * (底 - 顶 + 1) > 500000:
+                    raise WorkbookError("已定义的可见表区超过50万格，请核实表区")
+                矩形.append([左, 顶, 右, 底])
+                for r in range(顶, 底 + 1):
+                    if 行可见(r):
+                        for c in range(左, 右 + 1):
+                            if 列可见(c):
+                                行段.setdefault(r, []).append([c, c])
+            行段 = _并段(行段)
         else:
             原因 = "工作表没有可见内容"
     return {"来源": 来源, "矩形": 矩形, "行": {str(k): v for k, v in 行段.items()}, "原因": 原因}
@@ -403,7 +417,7 @@ def read_workbook(path,context=None,areas=None):
                 c["hidden_column"]=any(lo<=c["column"]<=hi for lo,hi in hidden)
                 c["hidden_sheet"]=s.sheet_state!="visible"
                 c["hidden"]=c["hidden_row"] or c["hidden_column"] or c["hidden_sheet"]
-            out["sheets"].append({"name":s.title,"hidden":s.sheet_state!="visible","hidden_rows":[r for r,d in s.row_dimensions.items() if d.hidden],"hidden_columns":hidden,"max_row":max_row,"max_column":max_col,"merges":[str(m) for m in s.merged_cells.ranges],"cells":cells,"可见范围":_可见记录(s,打印,cells,hidden)})
+            out["sheets"].append({"name":s.title,"hidden":s.sheet_state!="visible","hidden_rows":[r for r,d in s.row_dimensions.items() if d.hidden],"hidden_columns":hidden,"max_row":max_row,"max_column":max_col,"merges":[str(m) for m in s.merged_cells.ranges],"cells":cells,"可见范围":_可见记录(s,打印,cells,hidden,areas)})
             if omissions:out["sheets"][-1]["structural_omissions"]=copy.deepcopy(omissions)
             if word_ranges is not None:out["sheets"][-1]["word_table_ranges"]=copy.deepcopy(word_ranges.get(s.title,[]))
         out["external_references"]=_external(w)

@@ -1,6 +1,7 @@
 # coding: utf-8
 """仅复核：使用现有接口验证完整两期、标题、金标准和日常操作，不修改功能。"""
 import datetime
+from 测试.单位样本 import 单位作用
 import json
 import shutil
 import subprocess
@@ -62,6 +63,7 @@ def _造场景(tmp_path, monkeypatch, 金原, B值, 方向="行", 其它表=Fals
                 for r, v in zip((2, 3), 两期):
                     s.cell(r, c, v)
             范围 = f"A1:{chr(65+len(数组))}3"
+        s["A1"] = "项目（单位：人民币元）"
         if 侧 == "A":
             wb.defined_names.add(DefinedName("TA_001", attr_text=f"'sheet1'!{范围}"))
         if 其它表 and 侧 == "B":
@@ -111,6 +113,8 @@ def _造场景(tmp_path, monkeypatch, 金原, B值, 方向="行", 其它表=Fals
             else:
                 for 行, 期 in zip(答["行"][1:], ("2025-01-01", "2025-12-31")):
                     行["期间实际"] = {"值": 期, "位置": f"A{行['行']}"}
+        if "作用范围" in 答:
+            答["作用范围"].update(单位作用("A1", "项目（单位：人民币元）", [c["列"] for c in 答["列"] if c["角色"] == "数据列"]))
         return json.dumps(答, ensure_ascii=False)
 
     monkeypatch.setattr("核心.识别.调用识别", 模型)
@@ -303,6 +307,7 @@ def test_从待答复续跑完成后不应继续提示旧待答复(tmp_path, mon
     wb = Workbook()
     wb.active.title = "word附注"
     wb.active["A1"] = 9
+    wb.active["B1"] = "单位：人民币元"
     wb.save(b)
     wb.close()
     入 = {"word": "模拟原件.docx", "b表": str(b), "金标准": str(_造金标准(tmp_path))}

@@ -29,7 +29,7 @@ def _造金标准(tmp_path):
 
 def _假提取(A值, word, excel, 带连接word, 上下文):
     wb = Workbook(); wb.active.title = "sheet1"; wb.active["A1"] = A值
-    wb.save(excel)
+    wb.active["B1"] = "单位：人民币元"; wb.save(excel)
     Path(带连接word).write_text("连接体", encoding="utf-8")
     Path(上下文).write_text(json.dumps({"tables": []}), encoding="utf-8")
     return {"ok": True, "table_count": 1, "warnings": []}
@@ -41,7 +41,7 @@ def test_全链stub(tmp_path, monkeypatch):
     # 真实小样本：B 是真实 xlsx（工作表 word附注，值为 9）；A 由假提取产出（sheet1，值为 100）
     b路径 = tmp_path / "b.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径); b前 = md5(b路径)
+    wb.active["B1"] = "单位：人民币元"; wb.save(b路径); b前 = md5(b路径)
     金路径 = _造金标准(tmp_path)
 
     def 假提取(word, excel, 带连接word, 上下文):
@@ -53,9 +53,9 @@ def test_全链stub(tmp_path, monkeypatch):
         if 指令.startswith("在第一遍"):
             return ('{"表":[{"行范围":[1,1],"科目":"货币资金","表名":"余额构成",'
                     '"表组":"G1","续表序":1}]}')
-        return ('{"列":[{"列":"A","路径":"期末余额","角色":"数据列","期间角色":"本期期末"}],'
+        return ('{"列":[{"列":"A","路径":"期末余额","角色":"数据列","期间角色":"本期期末"},{"列":"B","路径":"单位","角色":"说明列"}],'
                 '"行":[{"行":1,"名字":"库存现金","角色":"数据","序号":null,"槽位":{"A":"C-N006-T001-S002"}}],'
-                '"作用范围":{"币种":"人民币","单位":"元"},"空名单":[],"例外":[]}')
+                '"作用范围":{"币种":"人民币","单位":"元","单位依据":[{"来源":"表内","位置":"B1","原文":"单位：人民币元","片段":"人民币元","单位":"元","币种":"人民币","列":["A"]}]},"空名单":[],"例外":[]}')
 
     更新入参 = {}
 
@@ -88,7 +88,7 @@ def test_全链stub(tmp_path, monkeypatch):
 def test_无配置时停在待答复并写出材料(tmp_path, monkeypatch):
     b路径 = tmp_path / "b.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
+    wb.active["B1"] = "单位：人民币元"; wb.save(b路径)
     monkeypatch.setattr("核心.提取.调用桥接提取",
                     lambda word, excel, 带连接word, 上下文: _假提取(100, word, excel, 带连接word, 上下文))
     状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
@@ -119,8 +119,8 @@ def _装stub(monkeypatch, 上下文段="本表按账龄披露，无日期"):
     def 假提取(word, excel, 带连接word, 上下文):
         wb = Workbook(); wb.active.title = "sheet1"
         wb.active["A1"] = 9 if "新副本" in str(word) else 100
-        wb.defined_names["TA_001"] = DefinedName("TA_001", attr_text="sheet1!$A$1:$A$1")
-        wb.save(excel)
+        wb.defined_names["TA_001"] = DefinedName("TA_001", attr_text="sheet1!$A$1:$B$1")
+        wb.active["B1"] = "单位：人民币元"; wb.save(excel)
         Path(带连接word).write_text("连接体", encoding="utf-8")
         Path(上下文).write_text(json.dumps(
             {"tables": [{"range_name": "TA_001", "chapter_context": 上下文段}]},
@@ -135,10 +135,10 @@ def _装stub(monkeypatch, 上下文段="本表按账龄披露，无日期"):
                     '"表组":"G1","续表序":1}]}')
         日期 = "2025-12-31" if "word附注" in 材料 else "2024-12-31"
         return ('{"列":[{"列":"A","路径":"期末余额","角色":"数据列","期间角色":"本期期末",'
-                '"期间实际":"%s"}],'
+                '"期间实际":"%s"},{"列":"B","路径":"单位","角色":"说明列"}],'
                 '"行":[{"行":1,"名字":"库存现金","角色":"数据","序号":null,'
                 '"槽位":{"A":"C-N006-T001-S002"}}],'
-                '"作用范围":{"币种":"人民币","单位":"元"},"空名单":[],"例外":[]}' % 日期)
+                '"作用范围":{"币种":"人民币","单位":"元","单位依据":[{"来源":"表内","位置":"B1","原文":"单位：人民币元","片段":"人民币元","单位":"元","币种":"人民币","列":["A"]}]},"空名单":[],"例外":[]}' % 日期)
 
     def 假更新(word, excel, output, operations, caption_updates):
         Path(output).write_text("新Word", encoding="utf-8")
@@ -159,7 +159,7 @@ def test_回读差异不算完成(tmp_path, monkeypatch):
     _装stub(monkeypatch, "本表期末指2024年12月31日")
     b路径 = tmp_path / "b.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
+    wb.active["B1"] = "单位：人民币元"; wb.save(b路径)
     monkeypatch.setattr("核心.流程.回读验证",
                     lambda *a, **k: [{"格": "sheet1!A1", "期望": 9, "实际": 100}])
     状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
@@ -176,7 +176,7 @@ def test_人工改过的产物不被覆盖(tmp_path, monkeypatch):
     _装stub(monkeypatch, "本表期末指2024年12月31日")
     b路径 = tmp_path / "b.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
+    wb.active["B1"] = "单位：人民币元"; wb.save(b路径)
     运行目录 = tmp_path / "任务R7d"
     输入 = {"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))}
     运行任务(输入, 运行目录, {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
@@ -209,7 +209,7 @@ def test_中途失败后人工改Excel再续跑不覆盖(tmp_path, monkeypatch):
 
     b路径 = tmp_path / "b.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
+    wb.active["B1"] = "单位：人民币元"; wb.save(b路径)
     运行目录 = tmp_path / "任务失败后续跑"
     输入 = {"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))}
     try:
@@ -240,9 +240,11 @@ def test_续跑换了B表就拒绝(tmp_path, monkeypatch):
     _装stub(monkeypatch, "本表期末指2024年12月31日")
     b1 = tmp_path / "b1.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
+    wb.active["B1"] = "单位：人民币元"
     wb.save(b1)
     b2 = tmp_path / "b2.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 7
+    wb.active["B1"] = "单位：人民币元"
     wb.save(b2)
     运行目录 = tmp_path / "任务换输入"
     运行任务({"word": "原.docx", "b表": str(b1), "金标准": str(_造金标准(tmp_path))},
@@ -269,7 +271,7 @@ def test_一张表写失败就恢复原值再交付(tmp_path, monkeypatch):
 
     b路径 = tmp_path / "b.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
+    wb.active["B1"] = "单位：人民币元"; wb.save(b路径)
     运行目录 = tmp_path / "任务按表失败"
     状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
                 运行目录, {"url": "u", "api_key": "k", "model": "m", "timeout": 1})

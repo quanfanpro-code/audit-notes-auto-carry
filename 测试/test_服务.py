@@ -20,7 +20,7 @@ def _重置(配置路径=None, 运行根=None):
 def _样本(tmp_path):
     b路径 = tmp_path / "b.xlsx"
     wb = Workbook(); wb.active.title = "word附注"; wb.active["A1"] = 9
-    wb.save(b路径)
+    wb.active["B1"] = "单位：人民币元"; wb.save(b路径)
     金路径 = tmp_path / "金标准.jsonl"
     金路径.write_text(json.dumps({"note": {"name": "货币资金", "display_order": 1},
                      "table": {"name": "余额构成", "display_order": 1},
@@ -36,7 +36,7 @@ def _打桩(monkeypatch):
     def 假提取(word, excel, 带连接word, 上下文):
         wb = Workbook(); wb.active.title = "sheet1"
         wb.active["A1"] = 9 if "新副本" in str(word) else 100
-        wb.save(excel)
+        wb.active["B1"] = "单位：人民币元"; wb.save(excel)
         pathlib.Path(带连接word).write_text("连接体", encoding="utf-8")
         pathlib.Path(上下文).write_text(json.dumps({"tables": []}), encoding="utf-8")
         return {"ok": True, "table_count": 1, "warnings": []}
@@ -47,9 +47,9 @@ def _打桩(monkeypatch):
         if 指令.startswith("在第一遍"):
             return ('{"表":[{"行范围":[1,1],"科目":"货币资金","表名":"余额构成",'
                     '"表组":"G1","续表序":1}]}')
-        return ('{"列":[{"列":"A","路径":"期末余额","角色":"数据列","期间角色":"本期期末"}],'
+        return ('{"列":[{"列":"A","路径":"期末余额","角色":"数据列","期间角色":"本期期末"},{"列":"B","路径":"单位","角色":"说明列"}],'
                 '"行":[{"行":1,"名字":"库存现金","角色":"数据","序号":null,"槽位":{"A":"C-N006-T001-S002"}}],'
-                '"作用范围":{"币种":"人民币","单位":"元"},"空名单":[],"例外":[]}')
+                '"作用范围":{"币种":"人民币","单位":"元","单位依据":[{"来源":"表内","位置":"B1","原文":"单位：人民币元","片段":"人民币元","单位":"元","币种":"人民币","列":["A"]}]},"空名单":[],"例外":[]}')
 
     def 假更新(word, excel, output, operations, caption_updates):
         pathlib.Path(output).write_text("新Word", encoding="utf-8")

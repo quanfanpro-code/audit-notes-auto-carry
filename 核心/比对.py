@@ -90,6 +90,16 @@ def _键(记录) -> tuple:
 
 
 def _口径冲突(甲: list, 乙: list) -> bool:
+    a格 = {_键(r): r for r in 甲 if r.get("角色") != "项标签" and r.get("槽位")}
+    for r in 乙:
+        a = a格.get(_键(r))
+        if a is None:
+            continue
+        for 名 in _口径键:
+            av = (a.get("维度值") or {}).get(名)
+            bv = (r.get("维度值") or {}).get(名)
+            if av and bv and av != "未知" and bv != "未知" and av != bv:
+                return True
     for 名 in _口径键:
         a = {str((r.get("维度值") or {}).get(名) or "").strip() for r in 甲}
         b = {str((r.get("维度值") or {}).get(名) or "").strip() for r in 乙}
@@ -275,6 +285,13 @@ def 建立对应(A合集: list, B合集: list, A结构=None, B结构=None) -> li
     for 组键 in list(dict.fromkeys(list(a组) + list(b组) + list(A结) + list(B结))):
         甲, 乙 = a组.get(组键, []), b组.get(组键, [])
         A该表, B该表 = A结.get(组键) or {}, B结.get(组键) or {}
+        if any(x.get("单位问题") for x in (A结构 or []) + (B结构 or []) if _组(x) == 组键):
+            清单 += _整组未对应(甲, 乙, "单位依据不足或冲突")
+            continue
+        if (any(x.get("期间问题") for x in (A结构 or []) + (B结构 or []) if _组(x) == 组键)
+                or any(_期间未知(x) for x in 甲 + 乙 if x.get("角色") != "项标签")):
+            清单 += _整组未对应(甲, 乙, "期间角色未知")
+            continue
         if _口径冲突(甲, 乙):
             清单 += _整组未对应(甲, 乙, "口径冲突")
             continue

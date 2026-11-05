@@ -92,7 +92,7 @@ def _输入指纹(输入: dict) -> dict:
     """续跑必须认得出“还是不是同一个任务”：路径换了、内容换了、工作表换了，都不许复用。"""
     return {名: {"路径": str(输入.get(键) or ""), "哈希": _哈希(输入.get(键))}
             for 名, 键 in (("word", "word"), ("b表", "b表"), ("金标准", "金标准"))} | \
-           {"b工作表": _指定工作表(输入)}
+           {"b工作表": _指定工作表(输入), "规则版本": 证据模块.规则摘要()}
 
 
 def _指纹差异(旧: dict, 新: dict) -> list:
@@ -105,6 +105,8 @@ def _指纹差异(旧: dict, 新: dict) -> list:
             差.append(f"{名} 文件内容已变")
     if (旧 or {}).get("b工作表") != (新 or {}).get("b工作表"):
         差.append("数据表工作表不同")
+    if not (旧 or {}).get("规则版本") or 旧["规则版本"] != 新.get("规则版本"):
+        差.append("识别规则版本已变或旧任务缺少可核验版本")
     return 差
 
 
@@ -115,28 +117,32 @@ def _错误里的区域(消息: str, 区域到组: dict):
     return None
 
 
-_配对错误 = ("同侧重复", "口径冲突", "例外未执行", "列标签缺失", "越界解释")
+_配对错误 = ("同侧重复", "口径冲突", "例外未执行", "列标签缺失", "越界解释", "单位依据不足或冲突", "期间角色未知", "槽位编号缺失")
 
 
 def _发布第三遍(簿, 运行目录, 清单, A结构, B结构, 金标准版本, 规则版本) -> list:
     """第三遍在本组检查与适用配对检查之后发布；配对暴露的识别错误阻止入库。"""
     if 簿 is None:
         return []
-    侧按表 = {(x.get("工作表") or ""): "A" for x in A结构}
-    侧按表.update({(x.get("工作表") or ""): "B" for x in B结构})
+    # a格、b格已经给出来源侧；不能用工作表名推断侧，两份文件可以同名。
+    from openpyxl.utils.cell import coordinate_to_tuple
+    from openpyxl.utils import range_boundaries
     错误 = set()
     for 条 in 清单 or []:
-        if 条.get("状态") != "未对应":
+        if 条.get("状态") != "未对应" or str(条.get("原因") or "") not in _配对错误:
             continue
-        if str(条.get("原因") or "") not in _配对错误:
-            continue
-        for 键 in ("a格", "b格"):
+        for 键, 侧, 结构 in (("a格", "A", A结构), ("b格", "B", B结构)):
             格 = 条.get(键)
             if not 格:
                 continue
-            侧 = 侧按表.get(str(格).split("!", 1)[0])
-            if 侧:
-                错误.add((侧, str(条.get("表组") or "")))
+            表, 坐标 = str(格).rsplit("!", 1)
+            行, 列 = coordinate_to_tuple(坐标)
+            for 记录 in 结构:
+                if 记录.get("工作表") != 表:
+                    continue
+                左, 顶, 右, 底 = range_boundaries(记录["范围"])
+                if 左 <= 列 <= 右 and 顶 <= 行 <= 底:
+                    错误.add((侧, 记录.get("表组")))
     结果 = []
     for 侧 in ("A", "B"):
         候选 = _读jsonl(运行目录 / f"候选发布_{侧}.jsonl")
@@ -171,19 +177,6 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     索引 = 读索引(运行目录) or {"步骤": "extract", "已完成范围": [], "产物": {}}
     产物 = 索引.setdefault("产物", {})
 
-    # 任务入口统一刷新记录簿索引：同一服务进程的后续任务与直接调用共用同一实例
-    簿, 复used = None, {"可用": False, "原因": "跨任务复用已关闭"}
-    if 已启用(输入):
-        try:
-            簿 = 取记录簿(输入.get("识别记录目录"))
-            快照 = 簿.刷新()
-            复used = {"可用": bool(快照.get("可用")), "代次": 快照.get("代次"),
-                     "原因": 快照.get("原因") or ""}
-        except Exception as e:
-            簿, 复used = None, {"可用": False, "原因": f"记录簿不可用：{e}"}
-    索引["复用"] = 复used
-    写索引(运行目录, 索引)
-
     指纹 = _输入指纹(输入)
     旧指纹 = 索引.get("输入指纹")
     if 旧指纹:
@@ -196,6 +189,19 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
         raise RuntimeError("这个任务没有可信的输入指纹（可能是升级前建的），"
                            "不能判断旧结果是否来自当前输入：请新建任务")
     索引["输入指纹"] = 指纹
+    写索引(运行目录, 索引)
+
+    # 任务入口统一刷新记录簿索引：同一服务进程的后续任务与直接调用共用同一实例
+    簿, 复used = None, {"可用": False, "原因": "跨任务复用已关闭"}
+    if 已启用(输入):
+        try:
+            簿 = 取记录簿(输入.get("识别记录目录"))
+            快照 = 簿.刷新()
+            复used = {"可用": bool(快照.get("可用")), "代次": 快照.get("代次"),
+                     "原因": 快照.get("原因") or ""}
+        except Exception as e:
+            簿, 复used = None, {"可用": False, "原因": f"记录簿不可用：{e}"}
+    索引["复用"] = 复used
     写索引(运行目录, 索引)
 
     if "表A" not in 产物:

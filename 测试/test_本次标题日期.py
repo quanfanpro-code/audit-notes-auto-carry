@@ -1,5 +1,6 @@
 # coding: utf-8
 """本次标题：日期只取本次 B 对应表组的期间实际，配对后生成；生成不了整组撤回。"""
+from 测试.单位样本 import 单位作用
 import json
 import shutil
 from pathlib import Path
@@ -144,7 +145,7 @@ def _造(tmp_path, 年, 前缀, 金额):
     b = Workbook()
     ws2 = b.active
     ws2.title = "word附注"
-    ws2.append(["项目", f"{年}-01-01", f"{年}-12-31"])
+    ws2.append(["项目（单位：人民币元）", f"{年}-01-01", f"{年}-12-31"])
     ws2.append(["甲公司", 金额, 金额])
     B = tmp_path / f"{前缀}B.xlsx"
     b.save(B)
@@ -197,7 +198,7 @@ def _跑(tmp_path, 名, 年, 金额, monkeypatch, 记录目录=None, 带标题=T
                                  "期间实际": {"值": f"{年}-12-31", "位置": "C1"}}],
                             "行": [{"行": 1, "角色": "表头"},
                                   {"行": 2, "角色": "数据", "序号": 1, "槽位": {"B": "N001", "C": "N001"}}],
-                            "作用范围": {"币种": "人民币", "单位": "元"}, "空名单": [], "例外": []},
+                            "作用范围": 单位作用(["unit_text_candidates", 0] if Path(目录).name.startswith("A_") else "A1", "金额单位：人民币元" if Path(目录).name.startswith("A_") else "项目（单位：人民币元）", ["B", "C"], 来源="上下文" if Path(目录).name.startswith("A_") else "表内"), "空名单": [], "例外": []},
                            ensure_ascii=False)
 
     monkeypatch.setattr("核心.提取.调用桥接提取", 假提取)
