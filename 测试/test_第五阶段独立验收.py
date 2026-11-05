@@ -386,7 +386,7 @@ def test_网页显示续跑失败的实际原因(tmp_path):
     脚本 = r'''
 const fs = require("node:fs"), vm = require("node:vm");
 const 元素 = {}, 请求 = [], 定时 = [];
-function 取(id) { return 元素[id] ??= {value:"",textContent:"", listeners:{},
+function 取(id) { return 元素[id] ??= {value:"",textContent:"", selectedOptions:[], listeners:{},
   addEventListener(n,f) { this.listeners[n]=f; }}; }
 const 沙盒 = {document:{getElementById:取,querySelectorAll:()=>[]},
  clearInterval:()=>{},setInterval:(f,n)=>{定时.push(n);return 1;},
@@ -394,7 +394,7 @@ const 沙盒 = {document:{getElementById:取,querySelectorAll:()=>[]},
   return {status:url==="/api/任务"?400:200,json:async()=>url==="/api/任务"?{detail:"没有可续跑的任务"}:{}};}};
 vm.createContext(沙盒);
 vm.runInContext(fs.readFileSync("服务/页面/脚本.js","utf8"),沙盒);
-(async()=>{for(const id of ["word","b表","金标准"])取(id).value="模拟文件";
+(async()=>{for(const id of ["A文件","B文件","金标准"])取(id).value="模拟文件";
  await 取("续跑").listeners.click();
  console.log(JSON.stringify({进度:取("进度").textContent,开始轮询次数:定时.length,请求}));})().catch(e=>{console.error(e);process.exitCode=1;});
 '''

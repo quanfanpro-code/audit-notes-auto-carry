@@ -162,7 +162,7 @@ def 保存更新表(提取表A路径, 变更清单: dict, 输出路径) -> None:
     wb = load_workbook(源)
     try:
         for 格, 值 in 变更清单.items():
-            表名, 坐标 = 格.split("!", 1)
+            表名, 坐标 = 格.rsplit("!", 1)
             wb[表名][坐标] = 值
         wb.save(出)
     finally:

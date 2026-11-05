@@ -12,7 +12,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from 核心.流程 import 运行任务, 人工回写
-from 核心.接续 import 读索引
+from 核心.接续 import 读索引, 写索引
+from 核心.文件输入 import 列出工作表, 规范化输入
 from 核心.设置 import 保存模型配置, 读取模型配置, 默认配置路径
 
 页面目录 = Path(__file__).resolve().parent / "页面"
@@ -57,13 +58,35 @@ def 选文件(请求: dict):
     return {"路径": _选文件(请求.get("类型", "文件"))}
 
 
+@应用.post("/api/工作表")
+def 工作表(请求: dict):
+    try:
+        return {"工作表": 列出工作表(请求.get("路径") or "")}
+    except (ValueError, OSError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @应用.post("/api/任务")
 def 开始任务(请求: dict):
-    缺 = [k for k in ("word", "b表", "金标准") if not 请求.get(k)]
-    if 缺:
-        raise HTTPException(status_code=400, detail="缺少字段：" + "、".join(缺))
-    if 应用.state.状态.get("线程") and 应用.state.状态["线程"].is_alive():
-        return {"错误": "已有任务在运行"}
+    if "A" in 请求 or "B" in 请求:
+        缺 = [k for k in ("A", "B", "金标准") if not 请求.get(k)]
+        if 缺:
+            raise HTTPException(status_code=400, detail="缺少字段：" + "、".join(缺))
+        try:
+            规范化输入(请求)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    else:
+        缺 = [k for k in ("word", "b表", "金标准") if not 请求.get(k)]
+        if 缺:
+            raise HTTPException(status_code=400, detail="缺少字段：" + "、".join(缺))
+    线程 = 应用.state.状态.get("线程")
+    if 线程 and 线程.is_alive():
+        当前 = 读索引(应用.state.状态.get("运行目录")) or {}
+        终态 = {"done", "公式待核", "部分保留", "回读不一致", "识别失败",
+               "Excel交付失败", "任务失败", "用户中断"}
+        if 当前.get("步骤") not in 终态:
+            return {"错误": "已有任务在运行"}
     if 请求.get("续跑"):
         上次 = 应用.state.状态.get("运行目录")
         if 上次 and Path(上次).is_dir():
@@ -87,14 +110,33 @@ def 开始任务(请求: dict):
     def 跑():
         try:
             运行任务(请求, 运行目录, 配置, 取消=应用.state.状态.get("取消"))
-        except Exception as e:                       # 失败如实进日志，不吞
+        except Exception as e:
             应用.state.状态["日志"].append("失败：" + str(e))
+            运行目录.mkdir(parents=True, exist_ok=True)
+            索引 = 读索引(运行目录) or {"已完成范围": [], "产物": {}}
+            索引.update({"步骤": "任务失败", "错误": str(e)})
+            写索引(运行目录, 索引)
 
+    运行目录.mkdir(parents=True, exist_ok=True)
     取消 = threading.Event()
     线程 = threading.Thread(target=跑, daemon=True)
     应用.state.状态.update({"线程": 线程, "运行目录": 运行目录, "日志": [], "取消": 取消})
     线程.start()
     return {"运行目录": str(运行目录)}
+
+
+def _复用统计(运行目录):
+    出 = []
+    for 侧 in ("A", "B"):
+        路径 = Path(运行目录) / f"复用记录_{侧}.json"
+        if not 路径.is_file():
+            continue
+        记录 = json.loads(路径.read_text(encoding="utf-8"))
+        for 部分 in 记录.get("部分") or []:
+            出.append({"侧": 侧, "读取部分": 部分.get("读取部分"),
+                      "工作表": 部分.get("工作表"), "材料类型": 部分.get("材料类型"),
+                      **(部分.get("调用") or {})})
+    return 出
 
 
 @应用.get("/api/进度")
@@ -103,7 +145,8 @@ def 进度():
     索引 = (读索引(运行目录) if 运行目录 else None) or {}
     return {"步骤": 索引.get("步骤"),
             "已完成范围": len(索引.get("已完成范围", [])),
-            "待答复": 索引.get("待答复", []),          # 卡在哪份材料，要谁去答
+            "待答复": 索引.get("待答复", []),
+            "复用统计": _复用统计(运行目录) if 运行目录 else [],
             "运行目录": str(运行目录) if 运行目录 else None,
             "日志": 应用.state.状态.get("日志", [])[-20:]}
 
@@ -137,14 +180,20 @@ def 结果():
     索引 = 读索引(运行目录) or {}
     产物 = 索引.get("产物") or {}
     return {"对应": 对应, "问题": 读("问题清单.jsonl"), "回读": 读("回读记录.jsonl"),
-            "桥接提示": 索引.get("桥接提示") or [],
+            "公式核对": 读("公式核对记录.jsonl"), "公式待核数": 索引.get("公式待核数", 0),
+            "复用统计": _复用统计(运行目录), "桥接提示": 索引.get("桥接提示") or [],
+            "文件类型": ("excel" if 产物.get("Excel新副本") else
+                       "word" if 产物.get("Word新副本") else None),
             "摘要": {"对应条数": sum(1 for x in 对应 if x.get("状态") == "对应"),
                     "清尾条数": sum(1 for x in 对应 if x.get("状态") == "清尾"),
                     "未对应": 原因,
                     "回读差异": 索引.get("回读差异", 0),
+                    "公式待核数": 索引.get("公式待核数", 0),
                     "步骤": 索引.get("步骤")},
             "产物": {"运行目录": str(运行目录),
                     "更新后附注表格": 产物.get("更新后附注表格"),
+                    "A端新副本": 产物.get("A端新副本"),
+                    "Excel新副本": 产物.get("Excel新副本"),
                     "Word新副本": 产物.get("Word新副本")}}
 
 

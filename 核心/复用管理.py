@@ -49,18 +49,25 @@ def _影响(索引, 起点: list) -> dict:
             for 来源 in 项.get("来源") or []:
                 if 来源.get("任务"):
                     任务.add(str(来源["任务"]))
-                    对.add((str(来源["任务"]), str(来源.get("侧") or ""), str(来源.get("表组") or "")))
+                    对.add((str(来源["任务"]), str(来源.get("侧") or ""),
+                           str(来源.get("读取部分") or ""), str(来源.get("工作表") or ""),
+                           str(来源.get("表组") or "")))
                     表.add((str(来源.get("侧") or ""), str(来源.get("表组") or "")))
             for 用 in 使用:
                 if 用.get("解释版本") != 版本:
                     continue
                 if 用.get("任务"):
                     任务.add(str(用["任务"]))
-                    对.add((str(用["任务"]), str(用.get("侧") or ""), str(用.get("表组") or "")))
+                    对.add((str(用["任务"]), str(用.get("侧") or ""),
+                           str(用.get("读取部分") or ""), str(用.get("工作表") or ""),
+                           str(用.get("表组") or "")))
                 if 用.get("侧") or 用.get("表组"):
                     表.add((str(用.get("侧") or ""), str(用.get("表组") or "")))
         表.discard(("", ""))
-        return {"任务表组": [{"任务": t, "侧": a, "表组": g} for t, a, g in sorted(对)], "任务": sorted(任务), "表": [{"侧": 侧, "表组": 组} for 侧, 组 in sorted(表)]}
+        return {"任务表组": [{"任务": t, "侧": a, "表组": g,
+                           **({"读取部分": p, "工作表": w} if p or w else {})}
+                          for t, a, p, w, g in sorted(对)],
+                "任务": sorted(任务), "表": [{"侧": 侧, "表组": 组} for 侧, 组 in sorted(表)]}
 
     直接 = 归集(直接版本)
     全部 = 归集(影响版本)
