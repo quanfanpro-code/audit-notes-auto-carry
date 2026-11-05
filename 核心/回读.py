@@ -44,7 +44,7 @@ def 回读验证(word输出, 变更清单: dict, 临时目录) -> list:
     差异 = []
     try:
         for 格, 期望 in 变更清单.items():
-            表名, 坐标 = 格.split("!", 1)
+            表名, 坐标 = 格.rsplit("!", 1)
             实际 = wb[表名][坐标].value if 表名 in wb.sheetnames else None
             期望文 = "" if 期望 in (None, "") else str(期望)
             实际文 = "" if 实际 in (None, "") else str(实际)

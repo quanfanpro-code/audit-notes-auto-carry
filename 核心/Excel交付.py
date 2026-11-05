@@ -69,8 +69,8 @@ def _所属组(格, 组表):
 def _写入(cell, 值):
     if 值 is None or 值 == "":
         cell.ClearContents()
-    elif isinstance(值, str) and 值.startswith("="):
-        cell.Value2 = "'" + 值
+    elif isinstance(值, str):
+        cell.Value2 = "'" + 值          # 文字一律按文本落格，避免 Excel 自动转数字或日期
     else:
         cell.Value2 = 值
 
@@ -86,6 +86,9 @@ def _实际交付(请求):
     标题 = dict(请求.get("标题变更") or {})
     快照格 = _快照格(请求["A快照"])
     组表 = _组表(请求.get("A结构"))
+    # 标题与普通格共用同一份本次可见集合；取不到集合就不放行，不能当可见。
+    可见们 = {表["name"]: 取可见集(请求["A快照"], 表["name"])
+            for 表 in 请求["A快照"].get("sheets") or []}
     保留 = {x["a格"] for x in 请求.get("公式清单") or []}
     for 格 in list(变更):
         表, 坐标 = _拆(格)
@@ -121,6 +124,12 @@ def _实际交付(请求):
             if 组 in 撤回:
                 continue
             表, 坐标 = _拆(格)
+            集 = 可见们.get(表)
+            if 集 is None or not 集.含(*coordinate_to_tuple(坐标)):
+                撤回.add(组)
+                问题.append(_错误文本(
+                    格, 组, "缺少可见范围依据或格不在本次可见范围，已保留该组"))
+                continue
             cell = wb.Worksheets(表).Range(坐标)
             数组合格 = getattr(cell, "HasArray", False)
             合并从属 = False

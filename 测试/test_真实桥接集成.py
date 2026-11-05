@@ -234,7 +234,8 @@ def test_三组标题与数值_重新打开核对(tmp_path, monkeypatch):
     任务 = tmp_path / "任务"
     状态 = 运行任务({"word": str(word), "b表": str(B), "金标准": str(金), "b工作表": "word附注"},
                 任务, {"测试": True})
-    assert 状态["步骤"] == "done", 状态.get("步骤")
+    # 第二组标题日期冲突整组保留，状态如实为“部分保留”（五项修复的状态语义收紧）。
+    assert 状态["步骤"] == "部分保留", 状态.get("步骤")
     assert word.read_bytes() == 原哈希                     # 原 Word 未被改动
 
     输出 = Path(状态["产物"]["Word新副本"])

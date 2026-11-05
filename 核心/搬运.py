@@ -10,7 +10,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-_读不出 = ("读取失败", "公式无保存结果")
+_读不出 = ("读取失败", "公式无保存结果", "不可见")
 _错误值 = {"#DIV/0!", "#N/A", "#NAME?", "#NULL!", "#NUM!", "#REF!", "#VALUE!", "#SPILL!", "#CALC!", "#GETTING_DATA"}
 
 
