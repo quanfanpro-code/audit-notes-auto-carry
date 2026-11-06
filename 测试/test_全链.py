@@ -276,7 +276,7 @@ def test_一张表写失败就恢复原值再交付(tmp_path, monkeypatch):
     状态 = 运行任务({"word": "原.docx", "b表": str(b路径), "金标准": str(_造金标准(tmp_path))},
                 运行目录, {"url": "u", "api_key": "k", "model": "m", "timeout": 1})
     assert 次数["n"] == 2                                  # 撤回失败表后重试了一次
-    assert 状态["步骤"] == "done" and 状态["撤回表"] == ["TA_001"]
+    assert 状态["步骤"] == "部分保留" and 状态["撤回表"] == ["TA_001"]
     assert _读值(运行目录 / "更新后附注表格.xlsx") == 100    # 该表恢复原值，不写半截
     问题 = (运行目录 / "问题清单.jsonl").read_text(encoding="utf-8")
     assert "已保持原值" in 问题

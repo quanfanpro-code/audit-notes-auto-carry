@@ -455,7 +455,7 @@ def test_取消控制只终止本次工作进程(tmp_path, monkeypatch):
     monkeypatch.setattr(模块.subprocess, "Popen", lambda *a, **k: 假进程())
     取消 = threading.Event()
     取消.set()
-    with pytest.raises(RuntimeError, match="用户中断"):
+    with pytest.raises(InterruptedError, match="用户中断"):
         模块.交付Excel(A, tmp_path / "不交付.xlsx", {}, {}, [], [], {}, 取消=取消)
     assert 收到 == ["terminate"] and 文件哈希(A) == 前
 

@@ -206,6 +206,8 @@ def _识别整侧(侧, 读取部分们, 根目录, 配置, 金标准, 簿, 允�
     根目录 = Path(根目录)
     待答复 = []
     for 部分 in 读取部分们:
+        if 取消 is not None and 取消.is_set():
+            raise InterruptedError("用户中断")
         索引 = 读索引(根目录) or {"已完成范围": [], "产物": {}}
         已完成 = 索引.setdefault("已完成范围", [])
         标记 = f"识别{侧}:{部分['标识']}"
@@ -224,6 +226,8 @@ def _识别整侧(侧, 读取部分们, 根目录, 配置, 金标准, 簿, 允�
             索引.setdefault("已完成范围", []).append(标记)
             索引["已完成范围"] = list(dict.fromkeys(索引["已完成范围"]))
             写索引(根目录, 索引)
+    if 取消 is not None and 取消.is_set():
+        raise InterruptedError("用户中断")
     if 待答复:
         return {"结构清单": None, "合集": None, "统计": {}, "待答复": 待答复}
     结果 = _汇总一侧(侧, 读取部分们, 根目录)
@@ -307,6 +311,10 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     elif "表A" in 产物:
         raise RuntimeError("这个任务没有可信的输入指纹（可能是升级前建的），"
                            "不能判断旧结果是否来自当前输入：请新建任务")
+    # 续跑校验通过后才清上次状态，拒绝续跑时不改旧索引。
+    索引["步骤"] = "extract"
+    for 键 in ("错误", "识别错误", "Excel错误", "待答复"):
+        索引.pop(键, None)
     索引["输入指纹"] = 指纹
     写索引(运行目录, 索引)
 
@@ -361,13 +369,23 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
                     if x.get("侧") == "A" and x.get("完成")]
             if 甲侧:
                 允许科目 = {x["科目"] for x in 甲侧}
+        索引 = 读索引(运行目录) or 索引
+        索引["步骤"] = "identify_a" if 侧 == "A" else "identify_b"
+        写索引(运行目录, 索引)
         try:
             结果 = _识别整侧(侧, 材料[侧], 运行目录, 配置, 金标准, 簿,
                           允许科目=允许科目, 取消=取消)
+        except InterruptedError:
+            索引 = 读索引(运行目录) or 索引
+            索引["步骤"] = "用户中断"
+            索引.pop("待答复", None)
+            写索引(运行目录, 索引)
+            return 索引
         except Exception as e:
             索引 = 读索引(运行目录) or 索引
             索引.update({"步骤": "识别失败", "识别错误": str(e)})
             写索引(运行目录, 索引)
+            e.任务步骤 = 索引["步骤"]  # 只传本次异常类别，服务不借用旧任务的失败状态。
             raise
         if 结果["待答复"]:
             索引 = 读索引(运行目录) or 索引
@@ -427,6 +445,11 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
         json.dumps(标题证据, ensure_ascii=False, indent=2), encoding="utf-8")
     _写jsonl(运行目录 / "问题清单.jsonl", 问题)
 
+    if 取消 is not None and 取消.is_set():
+        索引["步骤"] = "用户中断"
+        写索引(运行目录, 索引)
+        return 索引
+
     if 输入["A"]["类型"] == "excel":
         A快照 = 读快照(材料["A"][0]["材料"], 业务范围=[
             {"sheet": x.get("工作表"), "range": x.get("范围")} for x in A结构
@@ -447,10 +470,16 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
                            公式清单, Excel标题, 取消=取消)
         except Exception as e:
             索引 = 读索引(运行目录) or 索引
-            索引.update({"步骤": "Excel交付失败", "Excel错误": str(e)})
+            中断 = isinstance(e, InterruptedError)
+            索引["步骤"] = "用户中断" if 中断 else "Excel交付失败"
+            if not 中断:
+                索引["Excel错误"] = str(e)
             if Excel路径.exists():
                 _登记(索引, "Excel候选副本", Excel路径)
             写索引(运行目录, 索引)
+            if 中断:
+                return 索引
+            e.任务步骤 = 索引["步骤"]
             raise
         问题 += 结果["问题"]
         差异 = 结果["回读差异"]
@@ -536,9 +565,9 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     索引["产物哈希"] = {"更新后附注表格": _哈希(更新表路径), "Word新副本": _哈希(Word路径)}
     索引["回读差异"] = len(差异)
     索引["撤回表"] = sorted(撤回)
-    # 标题撤回的组保留原样，状态须如实反映；桥接级写回撤回仍按原语义处理。
+    # 标题生成或实际写回有撤回，都只能算部分保留。
     索引["步骤"] = ("回读不一致" if 差异
-                 else "部分保留" if 标题撤回组 else "done")   # 有差异不许标完成
+                 else "部分保留" if (撤回 or 标题撤回组) else "done")
     索引["产物"].update({"更新后附注表格": str(更新表路径),
                    "Word新副本": str(Word路径)})
     写索引(运行目录, 索引)

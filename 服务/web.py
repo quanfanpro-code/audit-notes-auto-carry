@@ -114,7 +114,12 @@ def 开始任务(请求: dict):
             应用.state.状态["日志"].append("失败：" + str(e))
             运行目录.mkdir(parents=True, exist_ok=True)
             索引 = 读索引(运行目录) or {"已完成范围": [], "产物": {}}
-            索引.update({"步骤": "任务失败", "错误": str(e)})
+            步骤 = getattr(e, "任务步骤", "任务失败")
+            if 步骤 == "任务失败":
+                for 键 in ("识别错误", "Excel错误", "待答复"):
+                    索引.pop(键, None)
+            索引["步骤"] = 步骤
+            索引["错误"] = str(e)
             写索引(运行目录, 索引)
 
     运行目录.mkdir(parents=True, exist_ok=True)

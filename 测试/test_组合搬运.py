@@ -273,7 +273,7 @@ def test_取消后续跑只补剩余工作表(tmp_path, monkeypatch):
     monkeypatch.setattr("核心.识别.调用识别", 模型)
     任务 = tmp_path / "任务"
     状态 = 运行任务(输入, 任务, {"测试": True}, 取消=取消)
-    assert 状态["步骤"] == "identify_b" and 状态["待答复"]
+    assert 状态["步骤"] == "用户中断" and not 状态.get("待答复")
     assert "识别B:P001" in 状态["已完成范围"]
     assert "识别B:P002" not in 状态["已完成范围"]
     结果 = 跑场景(输入, 任务, _多表模型(), monkeypatch)

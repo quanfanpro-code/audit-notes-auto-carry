@@ -306,7 +306,7 @@ def _终止(worker, 状态路径):
     # Excel由COM宿主启动，父进程只能按本次登记的窗口进程号结束自己的实例。
     import ctypes
     hwnd = 状态.get("excel_hwnd")
-    if hwnd:
+    if hwnd and 状态.get("python") == worker.pid:
         pid = ctypes.c_ulong()
         ctypes.windll.user32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(pid))
         if pid.value:
@@ -338,17 +338,24 @@ def 交付Excel(原件, 输出, 变更: dict, A快照: dict, A结构: list, 公�
             if 取消 is not None and 取消.is_set():
                 _终止(worker, 状态路径)
                 已终止 = True
-                raise RuntimeError("用户中断，已停止本次Excel工作进程")
+                raise InterruptedError("用户中断，已停止本次Excel工作进程")
             if time.monotonic() > 截止:
                 _终止(worker, 状态路径)
                 已终止 = True
                 raise TimeoutError("Excel计算或保存未完成")
             time.sleep(0.1)
-        if worker.returncode or not 结果路径.is_file():
-            raise RuntimeError("Excel工作进程失败：" + 日志路径.read_text(encoding="utf-8", errors="replace")[-1000:])
-        结果 = json.loads(结果路径.read_text(encoding="utf-8"))
-        if not 结果.get("成功"):
-            raise RuntimeError(结果.get("错误") or "Excel交付失败")
+        try:
+            结果 = json.loads(结果路径.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            结果 = {}
+        # 结果文件沿用原名，但只能消费这次请求写出的内容。
+        if not isinstance(结果, dict) or 结果.get("请求") != 请求路径.name:
+            结果 = {}
+        if 结果.get("成功") is False and 结果.get("错误"):
+            raise RuntimeError(结果["错误"])
+        if worker.returncode or 结果.get("成功") is not True or not isinstance(结果.get("结果"), dict):
+            raise RuntimeError(f"Excel未取得本次有效交付结果（退出码{worker.returncode}）："
+                               + 日志路径.read_text(encoding="utf-8", errors="replace")[-1000:])
         return 结果["结果"]
     except Exception:
         if worker.poll() is None and not 已终止:
@@ -364,5 +371,6 @@ if __name__ == "__main__" and len(sys.argv) == 3 and sys.argv[1] == "--worker":
         内容 = {"成功": True, "结果": 结果}
     except Exception as e:
         内容 = {"成功": False, "错误": f"{type(e).__name__}: {e}"}
+    内容["请求"] = 请求路径.name
     结果路径.write_text(json.dumps(内容, ensure_ascii=False, default=str), encoding="utf-8")
     sys.exit(0 if 内容["成功"] else 1)
