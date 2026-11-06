@@ -33,7 +33,7 @@ def _按显示精度一致(期望, 实际) -> bool:
     return False
 
 
-def 回读验证(word输出, 变更清单: dict, 临时目录) -> list:
+def 回读验证(word输出, 变更清单: dict, 临时目录, 实际值=None, 留证格=()) -> list:
     临时目录 = Path(临时目录)
     临时目录.mkdir(parents=True, exist_ok=True)
     回读表 = 临时目录 / "回读表.xlsx"
@@ -43,6 +43,11 @@ def 回读验证(word输出, 变更清单: dict, 临时目录) -> list:
     wb = load_workbook(回读表)
     差异 = []
     try:
+        if 实际值 is not None:
+            for 格 in 留证格:
+                表名, 坐标 = 格.rsplit("!", 1)
+                if 表名 in wb.sheetnames:
+                    实际值[格] = wb[表名][坐标].value
         for 格, 期望 in 变更清单.items():
             表名, 坐标 = 格.rsplit("!", 1)
             实际 = wb[表名][坐标].value if 表名 in wb.sheetnames else None

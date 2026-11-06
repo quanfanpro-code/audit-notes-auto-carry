@@ -287,15 +287,19 @@ def test_桥接默认留证应与发布文件分开(tmp_path):
 def test_人工回写结构清单接口确实可执行_对照(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from 服务.web import 应用
+    from 服务 import web
+    monkeypatch.setattr(web, "运行根", tmp_path / "运行")
+    monkeypatch.setitem(应用.state._state, "状态", {"线程": None, "运行目录": None, "日志": []})
     收到 = {}
     def 更新(word, excel, output, operations, caption_updates):
         收到["操作"] = operations
+        Path(output).write_bytes(b"argument-test-placeholder")
         return {"ok": True}
     monkeypatch.setattr("核心.写回.调用桥接更新", 更新)
     操作 = [{"range_name": "TA_001", "axis": "row", "action": "insert", "index": 1, "count": 1, "template_index": 0}]
     with TestClient(应用) as c:
         r = c.post("/api/人工回写", json={"带连接word": "模拟.docx", "excel": "模拟.xlsx",
-                                    "输出": "新副本.docx", "结构操作": 操作}).json()
+                                    "输出": str(tmp_path / "新副本.docx"), "结构操作": 操作}).json()
     assert r["ok"] and 收到["操作"] == 操作
 
 
@@ -371,8 +375,8 @@ def test_同秒新任务也必须使用不同目录(tmp_path, monkeypatch):
     monkeypatch.setattr(web.threading, "Thread", 立即线程)
     monkeypatch.setattr(web, "运行任务", 跑)
     monkeypatch.setattr(web, "运行根", tmp_path / "运行")
-    monkeypatch.setattr(web.应用.state, "状态", {"线程": None, "运行目录": None, "日志": []})
-    monkeypatch.setattr(web.应用.state, "配置路径", tmp_path / "不存在.json")
+    monkeypatch.setitem(web.应用.state._state, "状态", {"线程": None, "运行目录": None, "日志": []})
+    monkeypatch.setitem(web.应用.state._state, "配置路径", tmp_path / "不存在.json")
     # 直接调用路由，线程替身只固定时间顺序，不启动服务和窗口。
     入 = {"word": "模拟.docx", "b表": "模拟.xlsx", "金标准": "模拟.jsonl"}
     一 = web.开始任务(入)["运行目录"]
@@ -388,7 +392,7 @@ const fs = require("node:fs"), vm = require("node:vm");
 const 元素 = {}, 请求 = [], 定时 = [];
 function 取(id) { return 元素[id] ??= {value:"",textContent:"", selectedOptions:[], listeners:{},
   addEventListener(n,f) { this.listeners[n]=f; }}; }
-const 沙盒 = {document:{getElementById:取,querySelectorAll:()=>[]},
+const 沙盒 = {window:{__AUDIT_TOKEN__:"验收令牌"},document:{getElementById:取,querySelectorAll:()=>[]},
  clearInterval:()=>{},setInterval:(f,n)=>{定时.push(n);return 1;},
  fetch:async (url,opt)=>{请求.push({url,body:opt?.body?JSON.parse(opt.body):null});
   return {status:url==="/api/任务"?400:200,json:async()=>url==="/api/任务"?{detail:"没有可续跑的任务"}:{}};}};

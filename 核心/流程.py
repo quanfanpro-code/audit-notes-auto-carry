@@ -12,6 +12,8 @@
 """
 import hashlib
 import json
+import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -55,6 +57,68 @@ def _避让(路径: Path, 旧哈希):
 def _登记(索引: dict, 名: str, 路径) -> None:
     索引.setdefault("产物", {})[名] = str(路径)
     索引.setdefault("产物哈希", {})[名] = _哈希(路径)
+
+
+def _保存交付事实(目录, 索引, A, B, 对应, 来源, 变更, 实值, 问题, 差异,
+              结构, 标题, 输出, 公式=()):
+    """只记录既有执行结果；展示记录失败不改变已经交付的文件和业务结论。"""
+    try:
+        说明路径 = 目录 / "任务说明.json"
+        说明 = json.loads(说明路径.read_text(encoding="utf-8-sig")) if 说明路径.is_file() else {}
+        公共 = {"task_id": 目录.name, "执行次数": 说明.get("执行次数", 0),
+                "侧": "A", "输出": str(输出), "输出哈希": _哈希(输出)}
+        对应表 = {x.get("a格"): x for x in 对应}
+        B表 = {x.get("格"): x for x in B}
+        公式表 = {x.get("a格"): x for x in 公式}
+        差异格 = {x.get("格") for x in 差异}
+        明细 = []
+        for 甲 in A:
+            格 = 甲.get("格")
+            条 = 来源.get(格) or 对应表.get(格) or {}
+            乙 = B表.get(条.get("b格")) or {}
+            动作 = "原值保留"
+            if 格 in 变更:
+                动作 = ("已清空" if 变更[格] in (None, "") else
+                      "数值未变" if 甲.get("原值状态") == "值" and 甲.get("原值") == 变更[格]
+                      else "已写入")
+            if 格 in 公式表:
+                动作 = "公式保留"
+            if 格 in 差异格:
+                动作 = "回读有差异"
+            原因 = [i for i, x in enumerate(问题) if x.get("a格") == 格
+                  or (甲.get("表组") and (x.get("表组") == 甲["表组"]
+                      or 甲["表组"] in (x.get("组") or [])))]
+            明细.append({**公共, "类型": "格子", "a格": 格, "b格": 条.get("b格"),
+                       **{k: 甲.get(k) for k in ("表组", "读取部分", "科目", "表名", "角色",
+                                               "行路径", "列路径", "维度值", "原值", "原值状态")},
+                       "来源值": 乙.get("原值"), "来源值状态": 乙.get("原值状态"),
+                       "最终动作": 动作, "实际值": 实值.get(格), "实际值已取得": 格 in 实值,
+                       "原因引用": 原因, "公式核对": 公式表.get(格)})
+        for 表 in 结构:
+            原标题 = 表.get("标题") or 表.get("标题规则")
+            if not 原标题:
+                continue
+            动作们 = [x for x in 标题 if
+                    (x.get("range_name") == 表.get("区域") if 表.get("区域")
+                     else x.get("格") == f"{表.get('工作表')}!{原标题.get('位置')}"
+                     if isinstance(原标题, dict) else False)]
+            明细.append({**公共, "类型": "标题", "表组": 表.get("表组"),
+                       "读取部分": 表.get("读取部分"), "区域": 表.get("区域"),
+                       "工作表": 表.get("工作表"), "范围": 表.get("范围"),
+                       "原结论": 原标题, "最终动作": "已写回" if 动作们 else "原样保留",
+                       "动作": 动作们})
+        路径 = 目录 / "交付明细.jsonl"
+        临时 = 路径.with_name(f"交付明细_{uuid.uuid4().hex}.tmp")
+        临时.write_text("".join(json.dumps(x, ensure_ascii=False, default=str) + "\n"
+                               for x in 明细), encoding="utf-8")
+        os.replace(临时, 路径)
+        _登记(索引, "交付明细", 路径)
+        索引["交付明细执行次数"] = 公共["执行次数"]
+        索引.pop("展示错误", None)
+    except Exception as e:
+        索引["展示错误"] = f"结果明细不完整：{e}"
+        索引.setdefault("产物", {}).pop("交付明细", None)
+        索引.setdefault("产物哈希", {}).pop("交付明细", None)
 
 
 def _读jsonl(路径):
@@ -426,7 +490,8 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     索引["步骤"] = "carry"
     写索引(运行目录, 索引)
 
-    变更, 问题 = 生成更新表({}, 清单, b记录, a记录)
+    搬运来源 = {}
+    变更, 问题 = 生成更新表({}, 清单, b记录, a记录, 留证=搬运来源)
     超额问题 = [{"原因": x.get("原因"), "表组": x.get("表组"), "槽位": x.get("槽位")}
             for x in 清单 if str(x.get("原因") or "").startswith("B多出项")
             or str(x.get("原因") or "").startswith("B空项")]
@@ -502,6 +567,10 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
         索引["步骤"] = ("回读不一致" if 差异
                      else "部分保留" if (结果["撤回组"] or 标题撤回组)
                      else "公式待核" if 结果["公式待核数"] else "done")
+        最终标题 = [x for x in 标题更新 if x.get("格") in 结果.get("实际标题", {})]
+        _保存交付事实(运行目录, 索引, a记录, b记录, 清单, 搬运来源,
+                  结果.get("实际变更", {}), 结果.get("实际值", {}), 问题, 差异,
+                  A结构, 最终标题, Excel路径, 结果["公式核对"])
         写索引(运行目录, 索引)
         return 索引
 
@@ -556,7 +625,8 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
     索引["步骤"] = "readback"
     写索引(运行目录, 索引)
 
-    差异 = 回读验证(Word路径, 变更, 运行目录 / "回读临时")
+    实际值 = {}
+    差异 = 回读验证(Word路径, 变更, 运行目录 / "回读临时", 实际值=实际值, 留证格=a按格)
     _写jsonl(运行目录 / "回读记录.jsonl", 差异)      # 差异文件保留，不删证据
     if 差异:
         问题 += [{"原因": "回读不一致：写进 Word 后回读对不上，明细见 回读记录.jsonl",
@@ -570,6 +640,8 @@ def 运行任务(输入: dict, 运行目录, 配置: dict, 取消=None) -> dict:
                  else "部分保留" if (撤回 or 标题撤回组) else "done")
     索引["产物"].update({"更新后附注表格": str(更新表路径),
                    "Word新副本": str(Word路径)})
+    _保存交付事实(运行目录, 索引, a记录, b记录, 清单, 搬运来源, 变更,
+              实际值, 问题, 差异, A结构, 标题更新, Word路径)
     写索引(运行目录, 索引)
     return 索引
 

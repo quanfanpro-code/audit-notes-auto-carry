@@ -8,8 +8,8 @@ import threading
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 
 from 核心.流程 import 运行任务, 人工回写
 from 核心.接续 import 读索引, 写索引
@@ -24,25 +24,57 @@ from 核心.设置 import 保存模型配置, 读取模型配置, 默认配置�
 应用.state.状态 = {"线程": None, "运行目录": None, "日志": []}
 
 
+@应用.middleware("http")
+async def 会话保护(request: Request, call_next):
+    令牌 = getattr(应用.state, "会话令牌", None)
+    if 令牌 and request.method not in ("GET", "HEAD", "OPTIONS"):
+        if request.headers.get("X-Audit-Token") != 令牌:
+            return JSONResponse({"detail": {"类别": "会话已失效", "说明": "请重新打开本机程序页面"}}, status_code=403)
+    return await call_next(request)
+
+
+def _带会话(文):
+    令牌 = json.dumps(getattr(应用.state, "会话令牌", "") or "")
+    return 文.replace("<head>", "<head><script>window.__AUDIT_TOKEN__=" + 令牌 + ";</script>", 1)
+
+
+@应用.get("/桌面")
+def 桌面页():
+    p = Path(getattr(应用.state, "桌面页面", 页面目录.parent.parent / "desktop_ui" / "index.html"))
+    if not p.is_file():
+        return HTMLResponse("桌面页面缺失，请取得完整程序目录。", status_code=503)
+    return HTMLResponse(_带会话(p.read_text(encoding="utf-8")))
+
+
 def _选文件(类型="文件"):
+    原生选择 = getattr(应用.state, "文件选择器", None)
+    if 原生选择:
+        return 原生选择(类型)
     """后端弹 Windows 原生选择窗口（浏览器文件框拿不到真实路径）。"""
     if 类型 == "文件夹":
         脚本 = ("Add-Type -AssemblyName System.Windows.Forms; "
               "$d=New-Object System.Windows.Forms.FolderBrowserDialog; "
               "if($d.ShowDialog() -eq 'OK'){Write-Output $d.SelectedPath}")
     else:
+        类 = "SaveFileDialog" if 类型 == "另存为Word" else "OpenFileDialog"
+        筛选 = {"报表": "Word或Excel|*.docx;*.xlsx", "Word": "Word|*.docx", "Excel": "Excel|*.xlsx",
+                "金标准": "金标准|*.jsonl;*.json", "结构操作": "结构操作|*.json", "另存为Word": "Word|*.docx"}.get(类型, "所有文件|*.*")
         脚本 = ("Add-Type -AssemblyName System.Windows.Forms; "
-              "$d=New-Object System.Windows.Forms.OpenFileDialog; "
+              f"$d=New-Object System.Windows.Forms.{类}; $d.Filter='{筛选}'; "
               "if($d.ShowDialog() -eq 'OK'){Write-Output $d.FileName}")
-    完成 = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", 脚本],
+    脚本 = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; " + 脚本
+    程序 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    完成 = subprocess.run([str(程序), "-NoProfile", "-STA", "-Command", 脚本],
                      capture_output=True, text=True, encoding="utf-8",
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if 完成.returncode:
+        raise RuntimeError("Windows选择窗口未能打开：" + 完成.stderr.strip())
     return 完成.stdout.strip()
 
 
 @应用.get("/")
 def 首页():
-    return HTMLResponse((页面目录 / "index.html").read_text(encoding="utf-8"))
+    return HTMLResponse(_带会话((页面目录 / "index.html").read_text(encoding="utf-8")))
 
 
 @应用.get("/static")
@@ -68,66 +100,23 @@ def 工作表(请求: dict):
 
 @应用.post("/api/任务")
 def 开始任务(请求: dict):
-    if "A" in 请求 or "B" in 请求:
-        缺 = [k for k in ("A", "B", "金标准") if not 请求.get(k)]
-        if 缺:
-            raise HTTPException(status_code=400, detail="缺少字段：" + "、".join(缺))
-        try:
-            规范化输入(请求)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-    else:
-        缺 = [k for k in ("word", "b表", "金标准") if not 请求.get(k)]
-        if 缺:
-            raise HTTPException(status_code=400, detail="缺少字段：" + "、".join(缺))
-    线程 = 应用.state.状态.get("线程")
-    if 线程 and 线程.is_alive():
-        当前 = 读索引(应用.state.状态.get("运行目录")) or {}
-        终态 = {"done", "公式待核", "部分保留", "回读不一致", "识别失败",
-               "Excel交付失败", "任务失败", "用户中断"}
-        if 当前.get("步骤") not in 终态:
-            return {"错误": "已有任务在运行"}
+    import sys
+    from .任务服务 import 接受任务, 目录列表
+    宿主 = sys.modules[__name__]
+    续跑目录 = None
     if 请求.get("续跑"):
-        上次 = 应用.state.状态.get("运行目录")
-        if 上次 and Path(上次).is_dir():
-            运行目录 = Path(上次)
-        else:
-            候选 = sorted(p for p in 运行根.glob("任务_*") if p.is_dir())
+        续跑目录 = 应用.state.状态.get("运行目录")
+        if not 续跑目录 or not Path(续跑目录).is_dir():
+            候选 = 目录列表(宿主)
             if not 候选:
-                raise HTTPException(status_code=400, detail="没有可续跑的任务")
-            运行目录 = 候选[-1]            # 续跑：沿用原来的目录，不新建
-    else:
-        基 = 运行根 / ("任务_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
-        运行目录, 序 = 基, 1
-        while 运行目录.exists():          # 同一秒连开两个任务，目录名要避让，不能覆盖
-            序 += 1
-            运行目录 = 基.with_name(f"{基.name}_{序}")
+                raise HTTPException(400, "没有可续跑的任务")
+            续跑目录 = 候选[0]
     try:
-        配置 = 读取模型配置(应用.state.配置路径)
-    except Exception:
-        配置 = {}                                  # 没配过或配置坏了，都按“没配”处理
-
-    def 跑():
-        try:
-            运行任务(请求, 运行目录, 配置, 取消=应用.state.状态.get("取消"))
-        except Exception as e:
-            应用.state.状态["日志"].append("失败：" + str(e))
-            运行目录.mkdir(parents=True, exist_ok=True)
-            索引 = 读索引(运行目录) or {"已完成范围": [], "产物": {}}
-            步骤 = getattr(e, "任务步骤", "任务失败")
-            if 步骤 == "任务失败":
-                for 键 in ("识别错误", "Excel错误", "待答复"):
-                    索引.pop(键, None)
-            索引["步骤"] = 步骤
-            索引["错误"] = str(e)
-            写索引(运行目录, 索引)
-
-    运行目录.mkdir(parents=True, exist_ok=True)
-    取消 = threading.Event()
-    线程 = threading.Thread(target=跑, daemon=True)
-    应用.state.状态.update({"线程": 线程, "运行目录": 运行目录, "日志": [], "取消": 取消})
-    线程.start()
-    return {"运行目录": str(运行目录)}
+        return 接受任务(宿主, 请求, 续跑目录=续跑目录)
+    except HTTPException as e:
+        if e.status_code == 409 and "已有任务" in str(e.detail):
+            return {"错误": "已有任务在运行"}
+        raise
 
 
 def _复用统计(运行目录):
@@ -158,19 +147,11 @@ def 进度():
 
 @应用.post("/api/中断")
 def 中断():
-    事件 = 应用.state.状态.get("取消")
-    if 事件:
-        事件.set()
-    线程 = 应用.state.状态.get("线程")
-    运行目录 = 应用.state.状态.get("运行目录")
-    if 运行目录 and (线程 is None or not 线程.is_alive()):
-        索引 = 读索引(运行目录) or {}
-        # 等待答复时后台已退出，直接登记中断；材料和答复文件留给续跑。
-        if 索引.get("步骤") in ("identify_a", "identify_b") and 索引.get("待答复"):
-            索引["步骤"] = "用户中断"
-            索引.pop("待答复", None)
-            写索引(运行目录, 索引)
-    应用.state.状态["日志"].append("已请求中断（当前这张表做完后不再继续）")
+    import sys
+    from .任务服务 import 中断任务
+    目录 = 应用.state.状态.get("运行目录")
+    if 目录:
+        中断任务(sys.modules[__name__], 目录)
     return {"ok": True}
 
 
@@ -228,6 +209,7 @@ def 打开目录(请求: dict):
 def 读设置():
     路径 = 应用.state.配置路径
     配置 = 读取模型配置(路径) if Path(路径).is_file() else {}
+    配置["密钥已保存"] = bool(配置.get("api_key"))
     配置.pop("api_key", None)                 # 不回传密钥
     return 配置
 
@@ -238,12 +220,17 @@ def 存设置(请求: dict):
     旧 = 读取模型配置(路径) if Path(路径).is_file() else {}
     合并 = {**旧, **{k: v for k, v in 请求.items() if v not in ("", None)}}
     合并.setdefault("api_key", "")
+    合并.pop("密钥已保存", None)
+    from .人工操作 import 备份已有
+    备份已有(路径)
     保存模型配置(路径, 合并)
     return {"ok": True}
 
 
 @应用.post("/api/设置/测试")
 def 设置测试():
+    if not Path(应用.state.配置路径).is_file():
+        return {"ok": False, "说明": "还没有保存模型连接"}
     配置 = 读取模型配置(应用.state.配置路径)
     if not 配置.get("url"):
         return {"ok": False, "说明": "还没填 API 地址"}
@@ -264,7 +251,25 @@ def 设置测试():
 
 @应用.post("/api/人工回写")
 def 人工回写入口(请求: dict):
+    import sys
+    from .任务服务 import 接受任务
     try:
-        return {"ok": True, "结果": 人工回写(请求)}
+        返回 = 接受任务(sys.modules[__name__], 请求, 类型="人工回写", 后台=False)
+        if 返回.get("错误"):
+            return {"ok": False, "错误": 返回["错误"]}
+        return {"ok": True, "结果": 返回.get("结果")}
     except Exception as e:
         return {"ok": False, "错误": str(e)}
+
+
+import sys
+from .任务服务 import 挂接任务接口
+挂接任务接口(应用, sys.modules[__name__])
+from .结果展示 import 挂接结果接口
+挂接结果接口(应用, sys.modules[__name__])
+from .人工操作 import 挂接人工接口
+挂接人工接口(应用, sys.modules[__name__])
+from .记录展示 import 挂接记录接口
+挂接记录接口(应用, sys.modules[__name__])
+from .界面设置 import 挂接设置接口
+挂接设置接口(应用, sys.modules[__name__])

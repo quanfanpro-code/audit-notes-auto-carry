@@ -160,16 +160,19 @@ def test_续跑沿用原目录(tmp_path, monkeypatch):
 
 def test_人工回写认输出字段(tmp_path, monkeypatch):
     _重置(tmp_path / "配置.json")
+    monkeypatch.setattr(服务模块, "运行根", tmp_path / "运行")
     收到 = {}
 
     def 假更新(word, excel, output, operations, caption_updates):
         收到["output"] = output
+        pathlib.Path(output).write_bytes(b"argument-test-placeholder")
         return {"ok": True, "written_cells": 1, "errors": []}
 
     monkeypatch.setattr("核心.写回.调用桥接更新", 假更新)
     c = TestClient(应用)
-    r = c.post("/api/人工回写", json={"带连接word": "w.docx", "excel": "e.xlsx", "输出": "新.docx"})
-    assert r.json()["ok"] is True and 收到["output"] == "新.docx"
+    输出 = str(tmp_path / "新.docx")
+    r = c.post("/api/人工回写", json={"带连接word": "w.docx", "excel": "e.xlsx", "输出": 输出})
+    assert r.json()["ok"] is True and 收到["output"] == 输出
 
 
 

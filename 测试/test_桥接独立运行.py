@@ -96,15 +96,29 @@ def test_启动探针超时明确停止(tmp_path, monkeypatch):
         桥接.检查桥接运行环境(exe)
 
 
-def test_桥接检查失败时启动入口停止(monkeypatch):
-    import 服务.启动 as 启动
-    monkeypatch.setattr(启动, "准备桥接", lambda: False, raising=False)
-    def 不应选端口(*a, **k):
-        pytest.fail("环境失败后仍然启动了服务")
-    monkeypatch.setattr(启动, "选端口", 不应选端口)
-    with pytest.raises(SystemExit) as e:
-        runpy.run_path(str(根 / "启动服务.pyw"), run_name="__main__")
-    assert e.value.code == 1
+def test_旧启动入口不因未用Word能力阻止查看页面(monkeypatch):
+    import uuid
+    import webbrowser
+    import httpx
+    import 桌面窗口 as 桌面
+    import 核心.桥接 as 桥接
+    def 不应检查():
+        pytest.fail("尚未选择Word任务就检查桥接环境")
+    monkeypatch.setattr(桥接, "检查桥接运行环境", 不应检查)
+    锁 = 桌面.实例锁("启动验收_" + uuid.uuid4().hex)
+    服务 = 桌面.本机服务(需要桌面=False)
+    monkeypatch.setattr(桌面, "实例锁", lambda: 锁)
+    monkeypatch.setattr(桌面, "本机服务", lambda **参数: 服务)
+    打开 = []
+    def 打开页面(地址):
+        应答 = httpx.get(地址, trust_env=False)
+        assert 应答.status_code == 200
+        assert "审计附注" in 应答.text
+        打开.append(地址)
+        服务.服务器.should_exit = True
+    monkeypatch.setattr(webbrowser, "open", 打开页面)
+    runpy.run_path(str(根 / "启动服务.pyw"), run_name="__main__")
+    assert 打开 == [服务.地址 + "/"]
 
 
 def test_真实隔离NET安装仍能给出中文提示(tmp_path, monkeypatch):

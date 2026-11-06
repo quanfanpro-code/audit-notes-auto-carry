@@ -307,13 +307,15 @@ def test_续跑的新故障不能沿用旧失败类别(tmp_path, monkeypatch):
         任务 = 开始(客户端, 输入)
         等完()
         assert 读索引(任务)["步骤"] == "识别失败"
-        另一金 = tmp_path / "另一份金标准.jsonl"
-        另一金.write_bytes(金.read_bytes())
-        开始(客户端, {**输入, "金标准": str(另一金), "续跑": True})
+        # 输入不一致现在在接受前拒绝；这里继续验证真正运行后的新故障类别。
+        def 新故障(*args, **kwargs):
+            raise RuntimeError("第二次运行读取材料失败")
+        monkeypatch.setattr(web, "运行任务", 新故障)
+        开始(客户端, {**输入, "续跑": True})
         等完()
         索引 = 读索引(任务)
         assert 索引["步骤"] == "任务失败"
-        assert "续跑输入与原任务不一致" in 索引["错误"]
+        assert "第二次运行读取材料失败" in 索引["错误"]
         assert "识别错误" not in 索引
 
 

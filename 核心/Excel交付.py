@@ -196,8 +196,12 @@ def _实际交付(请求):
         标题 = {格: 值 for 格, 值 in 标题.items() if 目标组[格] not in 撤回}
     公式 = load_workbook(输出, data_only=False)
     数值 = load_workbook(输出, data_only=True)
-    差异 = []
+    差异, 实际值 = [], {}
     try:
+        for 格 in set(请求.get("留证格") or []) | set(标题):
+            表, 坐标 = _拆(格)
+            if 表 in 数值.sheetnames:
+                实际值[格] = 数值[表][坐标].value
         for 格, 期望 in 变更.items():
             表, 坐标 = _拆(格)
             实际 = 数值[表][坐标].value
@@ -260,7 +264,8 @@ def _实际交付(请求):
                         "a格": 项["a格"], "表组": 项.get("表组")})
     待核 = sum(x["结论"] != "本次金额一致" for x in 核对)
     return {"输出": str(输出), "回读差异": 差异, "公式核对": 核对, "公式待核数": 待核,
-            "问题": 问题, "撤回组": sorted(撤回)}
+            "问题": 问题, "撤回组": sorted(撤回), "实际变更": 变更,
+            "实际值": 实际值, "实际标题": 标题}
 
 
 def 收集保留公式(A快照, A结构, 对应清单, B合集):
@@ -324,7 +329,8 @@ def 交付Excel(原件, 输出, 变更: dict, A快照: dict, A结构: list, 公�
     日志路径 = 请求路径.with_name("Excel工作进程.log")
     请求 = {"原件": str(原件), "输出": str(输出), "变更": 变更, "A快照": A快照,
             "A结构": A结构, "公式清单": 公式清单, "标题变更": 标题变更,
-            "状态": str(状态路径)}
+            "状态": str(状态路径), "留证格": [f"{表['name']}!{格}" for 表 in A快照.get("sheets", [])
+                                       for 格 in (表.get("cells") or {})]}
     请求路径.write_text(json.dumps(请求, ensure_ascii=False, default=str), encoding="utf-8")
     with 日志路径.open("w", encoding="utf-8") as 日志:
         worker = subprocess.Popen([sys.executable, "-m", "核心.Excel交付", "--worker", str(请求路径)],

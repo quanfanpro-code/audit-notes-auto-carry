@@ -14,6 +14,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# 前端本机依赖；发布页面另行构建保留
+frontend/node_modules/
+
 # 编辑器与系统
 .vscode/
 .idea/

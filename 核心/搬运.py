@@ -46,7 +46,7 @@ def _逐格(对应清单: list, b按格: dict) -> tuple:
     return 变更, 问题
 
 
-def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集=None):
+def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集=None, 留证=None):
     """返回（变更清单 {格: 新值}, 问题清单）。
 
     有 A 合集时按“一项”处理：整项可搬才写，含项标签；清尾项整行／整列写空。
@@ -151,6 +151,14 @@ def 生成更新表(表A数据: dict, 对应清单: list, B合集: list, A合集
             变更[格] = ""
             continue
         变更[格] = "" if 乙.get("原值状态") == "真实空白" else 乙.get("原值")
+    if 留证 is not None:
+        for 格 in 变更:
+            甲 = a按格[格]
+            键 = _项键(甲)
+            清尾 = bool((项态.get(键) or {}).get("清尾"))
+            乙 = (标签来源.get(键) if 甲.get("角色") == "项标签"
+                 else b按格.get((条按a格.get(格) or {}).get("b格")))
+            留证[格] = {"b格": None if 清尾 else (乙 or {}).get("格"), "清尾": 清尾}
     return 变更, 问题
 
 
