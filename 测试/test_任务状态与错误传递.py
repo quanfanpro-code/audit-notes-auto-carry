@@ -357,3 +357,65 @@ def test_真实Excel运行中停止后可继续(tmp_path, monkeypatch):
         assert 前 == [文件哈希(A), 文件哈希(B)]
     留证("真实Excel停止", {"任务": 任务, "中断索引": 中断索引, "续跑索引": 索引,
                          "最终Excel": 输出, "实际金额名单": 实际, "原件哈希不变": True})
+
+
+@pytest.mark.parametrize("等待侧", ["A", "B"])
+def test_等待人工答复时中断保留材料并可继续(tmp_path, monkeypatch, 等待侧):
+    import 核心.识别 as 识别
+
+    A, B = _多表(tmp_path / "A.xlsx"), _多表(tmp_path / "B.xlsx", 来源=True)
+    输入 = _多表输入(A, B, _多表金(tmp_path / "金标准.jsonl"))
+    原件哈希 = [文件哈希(A), 文件哈希(B)]
+    原取答复, 模型 = 识别._取答复, _多表模型()
+
+    def 等待答复(目录, 指令, 材料, 配置, 只用已有答复, **参数):
+        return 原取答复(目录, 指令, 材料, 配置,
+                       只用已有答复 or Path(目录).name.startswith(等待侧 + "_"), **参数)
+
+    monkeypatch.setattr(识别, "_取答复", 等待答复)
+    monkeypatch.setattr(识别, "调用识别", 模型)
+    with TestClient(web.应用) as 客户端:
+        assert 客户端.post("/api/中断", json={}).json() == {"ok": True}
+        任务 = 开始(客户端, 输入)
+        等完()
+        等待索引 = 读索引(任务)
+        assert 等待索引["步骤"] == ("identify_a" if 等待侧 == "A" else "identify_b")
+        目录们 = [Path(p) for p in 等待索引["待答复"]]
+        assert 目录们 and all((p / "材料.txt").is_file() for p in 目录们)
+        原材料 = {p: p.read_bytes() for d in 目录们 for p in d.glob("*.txt")}
+        assert 客户端.post("/api/中断", json={}).json() == {"ok": True}
+        中断索引 = 读索引(任务)
+        进度 = 客户端.get("/api/进度").json()
+        摘要 = 客户端.get("/api/结果").json()["摘要"]
+        assert 中断索引["步骤"] == 进度["步骤"] == 摘要["步骤"] == "用户中断"
+        assert not 进度["待答复"]
+        assert all(p.read_bytes() == 内容 for p, 内容 in 原材料.items())
+        前索引 = (任务 / "接续索引.json").read_bytes()
+        客户端.post("/api/中断", json={})
+        assert (任务 / "接续索引.json").read_bytes() == 前索引
+
+        # 把答复放进原材料目录，再继续同一任务，证明中断没有销毁等待成果。
+        for d in 目录们:
+            答复 = 模型({"测试": True}, (d / "指令.txt").read_text(encoding="utf-8"),
+                        (d / "材料.txt").read_text(encoding="utf-8"), d)
+            (d / "答复.txt").write_text(答复, encoding="utf-8")
+        monkeypatch.setattr(识别, "_取答复", 原取答复)
+        assert 开始(客户端, {**输入, "续跑": True}) == 任务
+        等完()
+        续跑索引 = 读索引(任务)
+        输出 = Path(续跑索引["产物"]["Excel新副本"])
+        实际 = 读簿(输出)
+        assert 续跑索引["步骤"] == "done"
+        assert 实际["资金"][0] == ["资金甲", 901, 102]
+        assert 实际["往来"][0] == ["往来甲", 701, 710]
+        assert all(p.read_bytes() == 内容 for p, 内容 in 原材料.items())
+        assert 原件哈希 == [文件哈希(A), 文件哈希(B)]
+        完成索引 = (任务 / "接续索引.json").read_bytes()
+        完成文件哈希 = 文件哈希(输出)
+        客户端.post("/api/中断", json={})
+        assert (任务 / "接续索引.json").read_bytes() == 完成索引
+        assert 文件哈希(输出) == 完成文件哈希
+    留证("等待答复中断_" + 等待侧, {"任务": 任务, "中断索引": 中断索引,
+         "网页进度": 进度, "结果摘要": 摘要, "原材料目录": 目录们,
+         "续跑索引": 续跑索引, "输出": 输出, "实际名单金额": 实际,
+         "原件哈希不变": True, "原材料内容不变": True})

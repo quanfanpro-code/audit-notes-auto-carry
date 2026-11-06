@@ -161,6 +161,15 @@ def 中断():
     事件 = 应用.state.状态.get("取消")
     if 事件:
         事件.set()
+    线程 = 应用.state.状态.get("线程")
+    运行目录 = 应用.state.状态.get("运行目录")
+    if 运行目录 and (线程 is None or not 线程.is_alive()):
+        索引 = 读索引(运行目录) or {}
+        # 等待答复时后台已退出，直接登记中断；材料和答复文件留给续跑。
+        if 索引.get("步骤") in ("identify_a", "identify_b") and 索引.get("待答复"):
+            索引["步骤"] = "用户中断"
+            索引.pop("待答复", None)
+            写索引(运行目录, 索引)
     应用.state.状态["日志"].append("已请求中断（当前这张表做完后不再继续）")
     return {"ok": True}
 
