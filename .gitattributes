@@ -4,3 +4,6 @@ Word桥接/*.csproj -text whitespace=trailing-space,space-before-tab,cr-at-eol
 Word桥接/复用核心/来源.json -text whitespace=trailing-space,space-before-tab,cr-at-eol
 # 该上游原文件自带末尾空行，保留原样；仍检查行尾空格。
 Word桥接/复用核心/正文链接.cs whitespace=blank-at-eol,space-before-tab,cr-at-eol,-blank-at-eof
+
+# 识别记录样本按原始字节入库：批次摘要按字节校验，任何换行转换都会让记录簿判不可用。
+测试/样本/旧识别记录_ed1c644/** -text

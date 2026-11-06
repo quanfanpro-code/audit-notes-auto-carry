@@ -1,0 +1,18 @@
+{
+ "事件": [
+  {
+   "代次": 18,
+   "任务": "C:\\Users\\27651\\Documents\\Codex\\2026-11-04\\https-github-com-quanfanpro-code-audit-4\\outputs\\ed1c644-独立复核-20261105_213819\\反例1补证_复用漏搬实际金额\\关闭复用对照",
+   "侧": "A",
+   "原文件类型": "excel",
+   "工作表": "正常",
+   "类型": "使用",
+   "表组": "整侧",
+   "解释版本": "Vbeefb5898e210cd62c465e46",
+   "请求": "使用:C:\\Users\\27651\\Documents\\Codex\\2026-11-04\\https-github-com-quanfanpro-code-audit-4\\outputs\\ed1c644-独立复核-20261105_213819\\反例1补证_复用漏搬实际金额\\关闭复用对照:A:P001:整侧:Vbeefb5898e210cd62c465e46",
+   "读取部分": "P001"
+  }
+ ],
+ "代次": 20,
+ "请求": "使用:C:\\Users\\27651\\Documents\\Codex\\2026-11-04\\https-github-com-quanfanpro-code-audit-4\\outputs\\ed1c644-独立复核-20261105_213819\\反例1补证_复用漏搬实际金额\\关闭复用对照:A:P001:整侧:Vbeefb5898e210cd62c465e46"
+}
