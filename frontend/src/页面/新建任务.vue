@@ -3,22 +3,25 @@ import { reactive, ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { 请求, 请求标识, 最新请求 } from '../请求.js'
 import { 状态 } from '../任务状态.js'
 import UiIcon from '../图标.vue'
-const 文件 = reactive({ A: { 路径: '', 工作表: [] }, B: { 路径: '', 工作表: [] } })
-const 表们 = reactive({ A: [], B: [] })
-const 搜索 = reactive({ A: '', B: '' })
+状态.新建草稿 ||= {
+  文件: { A: { 路径: '', 工作表: [] }, B: { 路径: '', 工作表: [] } }, 表们: { A: [], B: [] }, 搜索: { A: '', B: '' },
+  设置: { 金标准: 状态.概况.默认设置?.金标准 || '', 复用: 状态.概况.默认设置?.复用 !== false, 记录目录: 状态.概况.默认设置?.识别记录目录 || '' },
+  已初始化: !!状态.概况.默认设置, 上次提交: null
+}
+const 草稿 = 状态.新建草稿
+const { 文件, 表们, 搜索, 设置 } = 草稿
 const 加载 = reactive({ A: false, B: false })
 const 错误 = ref('')
 const 提交中 = ref(false)
-const 设置 = reactive({ 金标准: 状态.概况.默认设置?.金标准 || '', 复用: 状态.概况.默认设置?.复用 !== false, 记录目录: 状态.概况.默认设置?.识别记录目录 || '' })
 const 管 = { A: 最新请求(), B: 最新请求() }
-let 上次提交, 已初始化 = !!状态.概况.默认设置
-watch(() => 状态.概况.默认设置, 值 => { if (值 && !已初始化) { Object.assign(设置, { 金标准: 值.金标准, 复用: 值.复用, 记录目录: 值.识别记录目录 }); 已初始化 = true } })
+let 已销毁 = false
+watch(() => 状态.概况.默认设置, 值 => { if (值 && !草稿.已初始化) { Object.assign(设置, { 金标准: 值.金标准, 复用: 值.复用, 记录目录: 值.识别记录目录 }); 草稿.已初始化 = true } })
 const 可开始 = computed(() => !状态.活动任务 && !提交中.value && !加载.A && !加载.B && 设置.金标准 && ['A', 'B'].every(侧 => 文件[侧].路径 && (!文件[侧].路径.toLowerCase().endsWith('.xlsx') || 文件[侧].工作表.length)))
 async function 选择(侧) {
   错误.value = ''; 加载[侧] = true
   try {
     const r = await 请求('/api/选文件', { 类型: '报表' })
-    if (!r.路径) return
+    if (!r.路径 || 已销毁) return
     if (!/\.(docx|xlsx)$/i.test(r.路径)) throw new Error('请选择 Word（docx）或 Excel（xlsx）文件')
     await 读取文件(侧, r.路径)
   } catch (e) { 错误.value = e.message }
@@ -36,10 +39,13 @@ async function 读取文件(侧, 路径, 原选择 = []) {
 }
 onMounted(async () => {
   const 原 = 状态.新建预填; 状态.新建预填 = null
-  if (!原) return
   for (const 侧 of ['A', 'B']) {
+    if (已销毁) return
+    const 恢复 = 原?.[侧] || 文件[侧]
+    if (!恢复.路径 || (!原 && 表们[侧].length)) continue
+    const 原搜索 = 搜索[侧]
     加载[侧] = true
-    try { await 读取文件(侧, 原[侧].路径, 原[侧].工作表 || []) }
+    try { await 读取文件(侧, 恢复.路径, 恢复.工作表 || []); if (!原 && !已销毁) 搜索[侧] = 原搜索 }
     catch (e) { 错误.value = e.message }
     finally { 加载[侧] = false }
   }
@@ -53,14 +59,15 @@ async function 开始() {
   提交中.value = true; 错误.value = ''
   const 输入 = { A: { ...文件.A }, B: { ...文件.B }, 金标准: 设置.金标准, 复用: 设置.复用, 识别记录目录: 设置.记录目录 || 设置.识别记录目录 || '' }
   const 内容 = JSON.stringify(输入)
-  if (!上次提交 || 上次提交.内容 !== 内容) 上次提交 = { 内容, id: 请求标识() }
+  if (!草稿.上次提交 || 草稿.上次提交.内容 !== 内容) 草稿.上次提交 = { 内容, id: 请求标识() }
   try {
-    const r = await 请求('/api/桌面/任务', { 请求标识: 上次提交.id, 原始输入: 输入 })
-    上次提交 = null; 状态.活动任务 = r.task_id; 状态.查看(r.task_id); 状态.刷新号++
+    const r = await 请求('/api/桌面/任务', { 请求标识: 草稿.上次提交.id, 原始输入: 输入 })
+    if (状态.新建草稿 === 草稿) 状态.新建草稿 = null
+    状态.活动任务 = r.task_id; 状态.查看(r.task_id); 状态.刷新号++
   } catch (e) { 错误.value = e.message }
   finally { 提交中.value = false }
 }
-onBeforeUnmount(() => { 管.A.取消(); 管.B.取消() })
+onBeforeUnmount(() => { 已销毁 = true; 管.A.取消(); 管.B.取消() })
 const 文件名 = 路径 => 路径.split(/[\\/]/).pop()
 </script>
 <template>

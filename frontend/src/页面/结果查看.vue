@@ -8,7 +8,7 @@ import ValueCell from '../值展示.vue'
 const props = defineProps({ 任务: Object })
 const 查看 = 状态.查看状态(props.任务.task_id)
 const 数据 = ref(null), 组们 = ref([]), 组总数 = ref(0), 文件 = ref([]), 错误 = ref(''), 加载 = ref(false), 详情 = ref(null), 文件展开 = ref([]), 宽度 = ref(window.innerWidth), 高度 = ref(window.innerHeight)
-const 管 = 最新请求()
+const 管 = 最新请求(), 组管 = 最新请求()
 let 版本 = '', 返回焦点
 const 基址 = '/api/桌面/任务/' + encodeURIComponent(props.任务.task_id)
 const 抽屉 = computed(() => 宽度.value < 1280)
@@ -29,9 +29,10 @@ async function 读取(清版本 = false) {
   } finally { 加载.value = false }
 }
 async function 读组(追加 = false) {
+  if (!追加) { 组们.value = []; 组总数.value = 0 }
   try {
-    const r = await 请求(基址 + '/结果?' + 参数({ view: '表', 侧: 'A', 搜索: 查看.表搜索, 仅需查看: 查看.仅需查看 || '', offset: 追加 ? 组们.value.length : 0, limit: 100 }))
-    组们.value = 追加 ? [...组们.value, ...r.条目] : r.条目; 组总数.value = r.总数
+    const r = await 组管.执行(signal => 请求(基址 + '/结果?' + 参数({ view: '表', 侧: 'A', 搜索: 查看.表搜索, 仅需查看: 查看.仅需查看 || '', offset: 追加 ? 组们.value.length : 0, limit: 100 }), undefined, { signal }))
+    if (r) { 组们.value = 追加 ? [...组们.value, ...r.条目] : r.条目; 组总数.value = r.总数 }
   } catch (e) { 错误.value = e.message }
 }
 async function 读文件() { try { 文件.value = (await 请求(基址 + '/文件')).条目 } catch (e) { 错误.value = e.message } }
@@ -55,10 +56,10 @@ async function 复制详情() {
 }
 watch(() => 查看.视图, () => { 查看.组 = ''; 查看.状态 = ''; 筛选() })
 onMounted(() => { 读取(); 读组(); 读文件(); window.addEventListener('resize', 尺寸); window.addEventListener('keydown', 按键) })
-onBeforeUnmount(() => { 管.取消(); window.removeEventListener('resize', 尺寸); window.removeEventListener('keydown', 按键) })
+onBeforeUnmount(() => { 管.取消(); 组管.取消(); window.removeEventListener('resize', 尺寸); window.removeEventListener('keydown', 按键) })
 </script>
 <template>
-  <section class="内容卡 结果结论"><div class="详情标题"><h2>核查本次结果</h2><div class="操作行"><el-button v-for="x in 文件.filter(x => ['Word新副本','Excel新副本'].includes(x.名称))" :key="x.file_id" type="primary" :disabled="!x.存在" @click="打开(x)">打开{{ x.名称.startsWith('Word') ? 'Word' : 'Excel' }}新副本</el-button><el-button @click="状态.页面 = '新建任务'">再做一份</el-button></div></div>
+  <section class="内容卡 结果结论"><div class="详情标题"><h2>核查本次结果</h2><div class="操作行"><el-button v-for="x in 文件.filter(x => ['Word新副本','Excel新副本'].includes(x.名称))" :key="x.file_id" type="primary" :disabled="!x.存在" @click="打开(x)">打开{{ x.名称.startsWith('Word') ? 'Word' : 'Excel' }}新副本</el-button><el-button @click="状态.新建()">再做一份</el-button></div></div>
     <div class="结果计数" v-if="数据"><button class="问题入口" @click="查看.仅需查看=true;读组(false)">{{ 数据.需查看表数 || 0 }} 张表需要查看</button><span v-for="(数, 名) in 数据.计数" :key="名"><strong>{{ 数 }}</strong> 格{{ 名 }}</span><button class="问题入口" @click="查看.视图 = '问题'">{{ 数据.问题条数 }} 条问题 · 查看</button></div>
     <p class="辅助" v-if="数据">{{ 数据.明细完整性 }}。标题单独列示，问题条数不等于格数。</p>
     <el-alert v-for="提示 in 数据?.提示 || []" :key="提示" :title="提示" type="warning" :closable="false" show-icon/>

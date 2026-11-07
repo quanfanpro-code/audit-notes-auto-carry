@@ -72,7 +72,8 @@ def 整理结果(目录):
     次数 = 说明.get("执行次数", 0)
     事实 = _读(目录, "交付明细.jsonl", 提示) if (索引.get("产物") or {}).get("交付明细") else []
     明细哈希 = (索引.get("产物哈希") or {}).get("交付明细")
-    明细变化 = bool(事实 and 明细哈希 and hashlib.sha256((目录 / "交付明细.jsonl").read_bytes()).hexdigest() != 明细哈希)
+    明细文件 = 目录 / "交付明细.jsonl"
+    明细变化 = bool(明细哈希 and (not 明细文件.is_file() or hashlib.sha256(明细文件.read_bytes()).hexdigest() != 明细哈希))
     if 明细变化:
         事实 = []
         提示.append("交付明细已变化，无法确认最终动作")

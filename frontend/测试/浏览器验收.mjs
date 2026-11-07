@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 
 const 根 = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 selectors.setTestIdAttribute('data-test')
@@ -72,6 +73,8 @@ try {
   }
 
   for(const 场景 of 清单.场景) {
+    const 哈希 = p => createHash('sha256').update(fs.readFileSync(p)).digest('hex')
+    const 原件 = ['A','B'].map(s => 哈希(场景.输入[s].路径))
     await 页.getByRole('button',{name:'新建任务',exact:true}).click()
     await 接口('/验收/选择队列',{路径:[场景.输入.B.路径,场景.输入.A.路径]})
     await 页.getByTestId('选择B').click()
@@ -84,6 +87,14 @@ try {
       assert(await 框.isChecked())
       assert(await 页.getByRole('checkbox',{name:'隐藏工作表（隐藏，不可选）',exact:true}).isDisabled())
     }
+    await 页.getByRole('button',{name:'设置',exact:true}).click()
+    await 页.getByRole('heading',{name:'设置',exact:true}).waitFor()
+    await 页.getByRole('button',{name:'新建任务',exact:true}).click()
+    for(const 侧 of ['A','B']) {
+      assert.equal(await 页.getByText(path.basename(场景.输入[侧].路径),{exact:true}).count(),1)
+      for(const 表 of 场景.输入[侧].工作表) assert(await 页.getByRole('checkbox',{name:表,exact:true}).isChecked())
+    }
+    assert(await 页.getByTestId('开始任务').isEnabled())
     const 接受=页.waitForResponse(r=>decodeURI(r.url()).endsWith('/api/桌面/任务')&&r.request().method()==='POST')
     await 页.getByTestId('开始任务').click()
     const 任务=await (await 接受).json()
@@ -93,7 +104,24 @@ try {
     assert(资金?.A实际值.原样文本==='901',JSON.stringify(明细))
     assert(明细.条目.some(x=>x.A实际值.原样文本==='本次甲'))
     const 文件=(await 接口('/api/桌面/任务/'+任务.task_id+'/文件')).条目
-    结果.任务.push({...场景,...任务,输出:文件.find(x=>x.名称==='Excel新副本'||x.名称==='Word新副本')?.路径})
+    const 输出=文件.find(x=>x.名称==='Excel新副本'||x.名称==='Word新副本')?.路径
+    const 成品哈希=哈希(输出)
+    for(let n=0;n<100 && (await 接口('/api/桌面/任务/'+任务.task_id+'/进度')).活动;n++)await 等(50)
+    assert.equal(await 页.getByRole('button',{name:'继续此任务',exact:true}).count(),0)
+    const 拒绝=await fetch(清单.地址+'/api/桌面/任务/'+任务.task_id+'/继续',{method:'POST',headers:{'Content-Type':'application/json','X-Audit-Token':清单.令牌},body:JSON.stringify({请求标识:'成品禁止继续'+任务.task_id})})
+    assert.equal(拒绝.status,409)
+    assert.equal((await 接口('/api/桌面/任务/'+任务.task_id+'/进度')).执行次数,1)
+    assert.equal(哈希(输出),成品哈希)
+    assert.deepEqual(['A','B'].map(s=>哈希(场景.输入[s].路径)),原件)
+    结果.任务.push({...场景,...任务,输出,设置往返保留:true,拒绝续跑:拒绝.status,成果未变:true,成品哈希,原件未变:true})
+    await 页.getByRole('button',{name:'再做一份',exact:true}).click()
+    assert(await 页.getByTestId('开始任务').isDisabled())
+    assert.equal(await 页.locator('.文件卡 .文件路径').count(),0)
+    await 页.getByRole('button',{name:'历史任务',exact:true}).click()
+    await 页.getByRole('textbox',{name:'搜索历史任务'}).fill(任务.task_id)
+    await 页.getByRole('button',{name:'查询',exact:true}).click()
+    await 页.getByRole('button',{name:'查看任务',exact:true}).click()
+    await 页.getByRole('heading',{name:'核查本次结果'}).waitFor()
   }
   await 页.screenshot({path:path.join(证据,'03_真实结果.png'),fullPage:true})
   for(const 页名 of ['识别记录','设置','人工回写']) {

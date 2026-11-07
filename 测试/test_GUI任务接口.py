@@ -7,15 +7,18 @@ from 服务 import web
 from 核心.接续 import 读索引, 写索引
 from 测试.GUI样本 import 准备, 开始, 等待, 核验金额
 from 测试.组合样本 import 文件哈希
+from 测试.test_Excel公式 import _模型
 
 
 def test_同请求不重复执行_真实副本与指定历史继续(tmp_path, monkeypatch):
-    c, 输入 = 准备(tmp_path, monkeypatch)
+    c, 输入 = 准备(tmp_path, monkeypatch, 模型=False)
     第一 = 开始(c, 输入)
     重发 = 开始(c, 输入)
     assert 第一["task_id"] == 重发["task_id"]
-    assert 等待(c, 第一["task_id"])["步骤"] == "done"
-    核验金额(第一["运行目录"])
+    assert 等待(c, 第一["task_id"])["等待"]
+    assert c.post(f'/api/桌面/任务/{第一["task_id"]}/中断').json()["显示状态"] == "用户中断"
+    monkeypatch.setattr(web, "读取模型配置", lambda _: {"url": "固定答复", "model": "验收"})
+    monkeypatch.setattr("核心.识别.调用识别", _模型())
     第二 = 开始(c, 输入, "开始二")
     assert 等待(c, 第二["task_id"])["步骤"] == "done"
     列表 = c.get("/api/桌面/任务").json()

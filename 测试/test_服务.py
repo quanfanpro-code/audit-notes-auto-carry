@@ -150,10 +150,20 @@ def test_续跑沿用原目录(tmp_path, monkeypatch):
     b路径, 金路径 = _样本(tmp_path)
     c = TestClient(应用)
     入参 = {"word": "原.docx", "b表": str(b路径), "金标准": str(金路径)}
+    原读取 = 服务模块.读取模型配置
+    monkeypatch.setattr(服务模块, "读取模型配置", lambda p: {})
     第一次 = c.post("/api/任务", json=入参).json()["运行目录"]
-    _等(c, "done")
-    第二次 = c.post("/api/任务", json={**入参, "续跑": True}).json()["运行目录"]
-    assert 第二次 == 第一次                      # 续跑用原目录，不新建
+    线程 = 应用.state.状态["线程"]
+    线程.join(10)
+    assert not 线程.is_alive()
+    等待 = c.get("/api/进度").json()
+    assert 等待["步骤"] == "identify_a" and 等待["待答复"]
+    monkeypatch.setattr(服务模块, "读取模型配置", 原读取)
+    续跑 = c.post("/api/任务", json={**入参, "续跑": True})
+    assert 续跑.status_code == 200
+    assert 续跑.json()["运行目录"] == 第一次       # 等待答复的任务继续用原目录
+    assert _等(c, "done")["步骤"] == "done"
+    assert c.post("/api/任务", json={**入参, "续跑": True}).status_code == 409
 
 
 
