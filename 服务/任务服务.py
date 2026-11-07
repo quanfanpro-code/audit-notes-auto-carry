@@ -8,6 +8,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
+from 运行位置 import 检查数据位置
 
 from fastapi import HTTPException
 from 核心.接续 import 读索引, 写索引
@@ -133,6 +134,13 @@ def 任务摘要(宿主, 目录):
 
 
 def _校验输入(输入, 类型):
+    try:
+        if 输入.get("识别记录目录"):
+            检查数据位置(输入["识别记录目录"])
+        if 类型 == "人工回写" and (输入.get("输出") or 输入.get("output")):
+            检查数据位置(输入.get("输出") or 输入["output"])
+    except ValueError as e:
+        拒绝(400, str(e))
     if 类型 == "人工回写":
         if not all(输入.get(k) for k in ("带连接word", "excel")) or not (输入.get("输出") or 输入.get("output")):
             拒绝(400, "请选择带连接Word、已修改Excel和新副本位置")

@@ -2,12 +2,13 @@
 """模型配置的保存与读取；API 密钥经 Windows DPAPI 加密落盘，不存明文。"""
 import json
 from pathlib import Path
+from 运行位置 import 软件目录
 
 import win32crypt
 
 
 def 默认配置路径() -> Path:
-    return Path(__file__).resolve().parent.parent / "模型配置.json"
+    return 软件目录() / "模型配置.json"
 
 
 def 保存模型配置(路径, 配置: dict) -> None:

@@ -18,6 +18,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from 运行位置 import 软件目录
 
 try:
     import msvcrt
@@ -56,7 +57,7 @@ def 目录是否安全(路径) -> bool:
 
 def 项目根() -> Path:
     """源码运行时的项目根：核心/ 的上一级。"""
-    return Path(__file__).resolve().parents[1]
+    return 软件目录()
 
 
 def 默认目录():

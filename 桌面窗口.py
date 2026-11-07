@@ -3,15 +3,17 @@
 import ctypes
 from ctypes import wintypes
 import secrets
+import sys
 import socket
 import threading
 import time
 from pathlib import Path
+from 运行位置 import 软件目录
 
 import uvicorn
 from 服务.启动 import 日志配置, 记启动
 
-根 = Path(__file__).resolve().parent
+根 = 软件目录()
 
 
 class 实例锁:
@@ -40,7 +42,7 @@ class 实例锁:
 
 class 本机服务:
     def __init__(self, 页面=None, 需要桌面=True):
-        self.页面 = Path(页面 or 根 / "desktop_ui" / "index.html")
+        self.页面 = Path(页面 or Path(__file__).resolve().parent / "desktop_ui" / "index.html")
         self.需要桌面 = 需要桌面
         self.服务器 = self.线程 = self.连接 = None
         self.令牌 = secrets.token_urlsafe(32)
@@ -153,7 +155,18 @@ def 启动桌面():
         return
     服务 = 本机服务()
     try:
+        if getattr(sys, "frozen", False):
+            import os
+            os.environ["PYTHONNET_RUNTIME"] = "coreclr"
+            from pythonnet import load
+            load("coreclr", runtime_config=str(根 / "运行库" / "桌面.runtimeconfig.json"),
+                 dotnet_root=str(根 / "运行库" / "dotnet"))
         import webview
+        if getattr(sys, "frozen", False):
+            浏览器 = 根 / "运行库" / "WebView2"
+            if not (浏览器 / "msedgewebview2.exe").is_file():
+                raise FileNotFoundError("软件文件夹缺少WebView2运行库，请使用完整的软件文件夹")
+            webview.settings["WEBVIEW2_RUNTIME_PATH"] = str(浏览器)
         服务.启动()
         桥 = 窗口桥()
         屏幕 = webview.screens[0]
@@ -169,7 +182,7 @@ def 启动桌面():
         from 服务.web import 应用
         应用.state.文件选择器 = 桥._选文件
         窗口.events.closing += 桥.关闭事件
-        webview.start(gui="edgechromium")
+        webview.start(gui="edgechromium", storage_path=str(根 / "运行" / "浏览器缓存"), private_mode=False)
     finally:
         from 服务.web import 应用
         应用.state.文件选择器 = None

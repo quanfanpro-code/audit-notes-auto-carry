@@ -7,6 +7,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
+from 运行位置 import 备份目录
 
 from 核心.接续 import 读索引
 from 核心.识别 import _解析对象
@@ -17,7 +18,7 @@ def 备份已有(路径):
     p = Path(路径)
     if not p.is_file():
         return
-    出 = Path(r"C:\Users\27651\BackUp") / ("audit-notes-auto-carry_界面保存_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f")) / p.name
+    出 = 备份目录() / ("audit-notes-auto-carry_界面保存_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f")) / p.name
     出.parent.mkdir(parents=True, exist_ok=False)
     前 = hashlib.sha256(p.read_bytes()).digest()
     shutil.copy2(p, 出)

@@ -56,7 +56,9 @@ internal static class Program
     static string? Backup(string path)
     {
         if (!File.Exists(path)) return null;
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "BackUp",
+        var backupRoot = Environment.GetEnvironmentVariable("审计附注_备份目录")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "BackUp");
+        var root = Path.Combine(backupRoot,
             "附注自动更新系统_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + "_" + Guid.NewGuid().ToString("N")[..6]);
         try
         {

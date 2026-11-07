@@ -83,7 +83,9 @@ public static class SafeFile
     public static string? BackupExisting(string file)
     {
         if (!File.Exists(file)) return null;
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "BackUp",
+        var backupRoot = Environment.GetEnvironmentVariable("审计附注_备份目录")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "BackUp");
+        var folder = Path.Combine(backupRoot,
             "独立附注工具_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + "_" + Guid.NewGuid().ToString("N")[..6]);
         try
         {

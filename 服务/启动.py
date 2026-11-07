@@ -7,8 +7,9 @@
 import socket
 from datetime import datetime
 from pathlib import Path
+from 运行位置 import 软件目录
 
-日志路径 = Path(__file__).resolve().parent.parent / "运行" / "启动日志.txt"
+日志路径 = 软件目录() / "运行" / "启动日志.txt"
 
 
 def 端口可用(端口: int) -> bool:

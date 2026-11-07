@@ -3,4 +3,4 @@ uvicorn==0.54.0
 httpx==0.28.1
 openpyxl==3.1.5
 pywin32==312
-pywebview==6.2.1
+pywebview @ git+https://github.com/r0x0r/pywebview.git@2ef305a6de8a02ac8e1da4973dc97ca9341c3f56

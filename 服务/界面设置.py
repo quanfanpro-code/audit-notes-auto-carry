@@ -2,10 +2,12 @@
 """非秘密的界面默认值；不改变已启动任务的原始输入。"""
 import json
 import os
+import sys
 from pathlib import Path
+from 运行位置 import 软件目录, 检查数据位置
 from 核心.共用记录簿 import 默认目录, 已启用
 
-根 = Path(__file__).resolve().parents[1]
+根 = 软件目录()
 设置路径 = 根 / "界面设置.json"
 基准路径 = 根 / "金标准" / "精简新副本_20261101_010814" / "财务报表附注语义金标准_当前基准_以此为准.jsonl"
 
@@ -15,6 +17,11 @@ def 读取默认():
     if 设置路径.is_file():
         已存 = json.loads(设置路径.read_text(encoding="utf-8-sig"))
         默认.update({k: v for k, v in 已存.items() if k in 默认})
+    if getattr(sys, "frozen", False):
+        for 名 in ("金标准", "识别记录目录"):
+            if 默认.get(名) and not Path(默认[名]).is_absolute():
+                默认[名] = str(根 / 默认[名])
+        检查数据位置(默认["识别记录目录"])
     return 默认
 
 
@@ -57,6 +64,15 @@ def 挂接设置接口(应用, 宿主):
         目录 = 新.get("识别记录目录")
         if 目录 and not Path(目录).is_absolute():
             拒绝(400, "请用选择窗口选择识别记录目录")
+        try:
+            if 目录:
+                检查数据位置(目录)
+        except ValueError as e:
+            拒绝(400, str(e))
+        if getattr(sys, "frozen", False):
+            for 名 in ("金标准", "识别记录目录"):
+                if 新.get(名) and Path(新[名]).resolve().is_relative_to(根):
+                    新[名] = str(Path(新[名]).resolve().relative_to(根))
         宿主.存设置(请求.get("模型") or {})
         备份已有(设置路径)
         原子JSON(设置路径, 新)

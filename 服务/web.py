@@ -6,6 +6,7 @@ import os
 import subprocess
 import threading
 from pathlib import Path
+from 运行位置 import 软件目录
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -17,7 +18,7 @@ from 核心.文件输入 import 列出工作表, 规范化输入
 from 核心.设置 import 保存模型配置, 读取模型配置, 默认配置路径
 
 页面目录 = Path(__file__).resolve().parent / "页面"
-运行根 = Path(__file__).resolve().parent.parent / "运行"
+运行根 = 软件目录() / "运行"
 
 应用 = FastAPI(title="审计附注自动搬运系统")
 应用.state.配置路径 = 默认配置路径()
